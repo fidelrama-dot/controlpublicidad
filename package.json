@@ -1,0 +1,15 @@
+{
+  "name": "controlpublicidad",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Prototipo navegable de ControlPublicidad, sin servicios de producción.",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "start": "python3 -m http.server 4173 --bind 127.0.0.1"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
+}

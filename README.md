@@ -3,8 +3,34 @@
 Sistema de evidencias fotográficas y videos con GPS para campañas de lonas, espectaculares y bardas.
 
 ## Estado
-Base de requisitos y reglas de dominio; todavía no es una aplicación instalable.
-Pendientes: cliente móvil, servidor, autenticación, almacenamiento cifrado, sincronización, panel web y mapa.
+Prototipo navegable de pantallas, adaptable a computadora y celular; todavía no es una aplicación instalable ni un servicio de producción.
+Incluye acceso de demostración, resumen, campañas, administración de usuarios, jerarquía de equipos, invitaciones de ejemplo, evidencias, mapa esquemático, captura simulada y estado de envíos.
+Pendientes: cliente móvil nativo, servidor, autenticación real, captura con cámara/GPS, almacenamiento cifrado, invitaciones válidas, sincronización real y cartografía interactiva.
+
+## Revisar las pantallas
+Abre `index.html` en un navegador. Es un archivo autónomo, sin recursos externos.
+Continúa con el contacto de ejemplo y usa el código de demostración `123456`.
+El selector superior permite explorar los cuatro roles y comparar dos equipos.
+Todas las fotografías y videos son ejemplos; no se abre la cámara ni se consultan coordenadas del teléfono.
+Crear campañas, editar usuarios, generar invitaciones y sellar/sincronizar registros afecta solo a la demo del navegador.
+Los borradores y cambios ficticios se guardan en localStorage sin cifrado. No introducir datos personales ni evidencias reales.
+Los permisos del prototipo son reglas de interfaz verificadas con pruebas; no sustituyen autorización en servidor.
+El esquema del mapa no representa cartografía real; sus puntos abren registros de ejemplo.
+Para reiniciar la demo, elimina el almacenamiento local del archivo/página en el navegador.
+
+## Desarrollo
+Node.js 22 o superior y Python 3 para el servidor opcional.
+```sh
+npm ci
+npm run build
+npm test
+npm start
+```
+El servidor local escucha en http://127.0.0.1:4173.
+Fuentes: `src/domain.mjs`, `src/app.mjs`, `src/styles.css` y `src/shell.html`.
+`node build.mjs` genera el archivo autónomo `index.html`; no necesita dependencias instaladas.
+Las pruebas de dominio e interacción usan datos ficticios y JSDOM.
+Verificación inicial: 14 pruebas automatizadas aprobadas. Revisión visual en navegador pendiente: este entorno bloqueó la apertura de archivos locales y no tenía Chromium disponible.
 
 ## Jerarquía y alcance
 - Administrador: único rol que crea campañas y asigna exactamente un líder por campaña; gestiona todos los usuarios y consulta todas las campañas.
@@ -126,6 +152,5 @@ Las tareas se mencionan en los permisos; su flujo y campos quedan por definir.
 - GPS sin permiso o impreciso: evidencia conservada y señalada.
 - Confirmación remota de todos los archivos antes de marcar sincronizado.
 
-## Pruebas de la base
-python3 -m unittest discover -s tests -v
-
+## Pruebas del prototipo
+`npm test`: aislamiento entre ramas, creación de campañas, filtros por fecha/campaña/tipo, nombres de archivo, límites de captura, conservación del borrador, sellado y sincronización simulada.
