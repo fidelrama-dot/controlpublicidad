@@ -152,3 +152,81 @@ test('HTTP requires session, CSRF and same-origin writes, and exposes no static 
     r=await fetch(address+'/api/auth/verify',{method:'POST',headers,body:'null'});assert.equal(r.status,400);
   }finally{await new Promise(resolve=>server.close(resolve));f.close();}
 });
+test('manual creation enforces direct cascade, unique contacts and active parents',()=>{
+  const f=fixture();
+  const added=f.service.createUser(f.actor('c1'),{name:'Nuevo colaborador',contact:'+52 55 1234 5678',campaignId:'p1',role:'leader'});
+  const m=f.service.data().memberships.find(m=>m.id===added.membershipId);
+  assert.equal(m.role,'collaborator');assert.equal(m.parentId,'m2');assert.equal(m.status,'active');
+  assert.equal(f.actor(added.userId).contact,'+525512345678');
+  forbidden(()=>f.service.createUser(f.actor('c1'),{name:'Otro',contact:'+525512345678',campaignId:'p1'}),409);
+  forbidden(()=>f.service.createUser(f.actor('c1'),{name:'Otro',contact:'other@example.invalid',campaignId:'p1',parentId:'m3'}),403);
+  forbidden(()=>f.service.createUser(f.actor('f1'),{name:'Otro',contact:'other@example.invalid',campaignId:'p1'}),403);
+  f.reopen();assert.equal(f.actor(added.userId).name,'Nuevo colaborador');f.close();
+});
+test('manual global leader can be edited, disabled, reactivated and assigned by admin',()=>{
+  const f=fixture(),leader=f.service.createUser(f.actor('a1'),{name:'Líder manual',contact:'manual-leader@example.invalid',role:'leader'});
+  f.service.updateGlobalUser(f.actor('a1'),leader.userId,{name:'Líder actualizado',status:'inactive'});
+  forbidden(()=>f.service.createCampaign(f.actor('a1'),{name:'Campaña',location:'Morelia',leaderId:leader.userId,types:['lona']}),400);
+  forbidden(()=>f.service.updateGlobalUser(f.actor('l1'),leader.userId,{name:'Ataque',status:'active'}),403);
+  f.service.updateGlobalUser(f.actor('a1'),leader.userId,{name:'Líder actualizado',status:'active'});
+  const c=f.service.createCampaign(f.actor('a1'),{name:'Campaña',location:'Morelia',leaderId:leader.userId,types:['lona']});
+  assert.equal(c.leaderId,leader.userId);f.close();
+});
+test('admin transfer versions memberships and keeps immutable evidence in original branch',()=>{
+  const f=fixture(),input=manifest(),bytes=Buffer.from([255,216,255,224,1,2,3,4]);
+  f.service.createRecord(f.actor('f1'),input);f.service.uploadChunk(f.actor('f1'),input.id,input.media[0].id,0,bytes);f.service.finalize(f.actor('f1'),input.id);
+  const original=JSON.stringify(f.service.data().records[0]);
+  forbidden(()=>f.service.transferMember(f.actor('l1'),'m4',{parentId:'m8'}),403);
+  forbidden(()=>f.service.transferMember(f.actor('c1'),'m4',{parentId:'m8'}),403);
+  forbidden(()=>f.service.transferMember(f.actor('a1'),'m4',{parentId:'m7'}),409);
+  const moved=f.service.transferMember(f.actor('a1'),'m4',{parentId:'m8'});
+  assert.equal(f.service.data().memberships.find(m=>m.id==='m4').status,'transferred');
+  assert.equal(JSON.stringify(f.service.data().records[0]),original);
+  assert.equal(f.service.bootstrap(f.actor('l1')).records.length,1);assert.equal(f.service.bootstrap(f.actor('l2')).records.length,0);
+  assert.equal(f.service.bootstrap(f.actor('f1')).records.length,1);
+  forbidden(()=>f.service.updateMember(f.actor('a1'),'m4',{name:'Historial',status:'active'}),404);
+  forbidden(()=>f.service.createRecord(f.actor('f1'),manifest('m4')),403);
+  const newer=manifest(moved.membershipId);newer.type='espectacular';f.service.createRecord(f.actor('f1'),newer);
+  f.reopen();assert.equal(f.service.data().memberships.find(m=>m.id===moved.membershipId).parentId,'m8');f.close();
+});
+test('same-campaign transfers keep historical branch and allow transfer back without duplicate current membership',()=>{
+  const f=fixture();
+  const moved=f.service.transferMember(f.actor('a1'),'m4',{parentId:'m3'});
+  assert.equal(f.service.data().memberships.find(m=>m.id===moved.membershipId).campaignId,'p1');
+  assert.ok(!f.service.bootstrap(f.actor('c1')).memberships.some(m=>m.id===moved.membershipId));
+  assert.ok(f.service.bootstrap(f.actor('c2')).memberships.some(m=>m.id===moved.membershipId));
+  f.service.transferMember(f.actor('a1'),moved.membershipId,{parentId:'m2'});
+  assert.equal(f.store.all("SELECT id FROM memberships WHERE user_id='f1' AND campaign_id='p1' AND status!='transferred'").length,1);
+  assert.throws(()=>f.store.run("UPDATE memberships SET parent_id='m7' WHERE id=?",moved.membershipId),/Invalid membership parent/);
+  f.close();
+});
+test('a sealed upload remains resumable by its original author after transfer',()=>{
+  const f=fixture(),input=manifest(),bytes=Buffer.from([255,216,255,224,1,2,3,4]);
+  f.service.createRecord(f.actor('f1'),input);f.service.transferMember(f.actor('a1'),'m4',{parentId:'m8'});
+  assert.equal(f.service.createRecord(f.actor('f1'),input).status,'uploading');
+  f.service.uploadChunk(f.actor('f1'),input.id,input.media[0].id,0,bytes);
+  assert.equal(f.service.finalize(f.actor('f1'),input.id).status,'synced');
+  assert.equal(f.service.bootstrap(f.actor('l2')).records.length,0);f.close();
+});
+test('migration from original unique-membership schema preserves records and foreign keys',()=>{
+  const f=fixture(),input=manifest();f.service.createRecord(f.actor('f1'),input);
+  f.store.db.exec(`PRAGMA foreign_keys=OFF;
+    CREATE TABLE legacy_memberships(id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL REFERENCES campaigns(id),user_id TEXT NOT NULL REFERENCES users(id),role TEXT NOT NULL CHECK(role IN ('leader','coordinator','collaborator')),parent_id TEXT REFERENCES memberships(id),status TEXT NOT NULL DEFAULT 'active',display_name TEXT,UNIQUE(campaign_id,user_id));
+    INSERT INTO legacy_memberships SELECT * FROM memberships;
+    DROP TABLE memberships;ALTER TABLE legacy_memberships RENAME TO memberships;
+    PRAGMA foreign_keys=ON;`);
+  f.reopen();assert.equal(f.service.data().memberships.length,10);
+  assert.equal(f.service.recordStatus(f.actor('f1'),input.id).status,'uploading');
+  f.service.transferMember(f.actor('a1'),'m4',{parentId:'m3'});
+  assert.deepEqual(f.store.all('PRAGMA foreign_key_check'),[]);
+  f.reopen();assert.deepEqual(f.store.all('PRAGMA foreign_key_check'),[]);f.close();
+});
+test('manual reactivation requires an active direct superior',()=>{
+  const f=fixture();
+  f.service.updateMember(f.actor('c1'),'m4',{name:'Sofía',status:'inactive'});
+  f.service.updateMember(f.actor('c1'),'m5',{name:'Luis',status:'inactive'});
+  f.service.updateMember(f.actor('l1'),'m2',{name:'Diego',status:'inactive'});
+  forbidden(()=>f.service.updateMember(f.actor('a1'),'m4',{name:'Sofía',status:'active'}),409);
+  f.service.updateMember(f.actor('l1'),'m2',{name:'Diego',status:'active'});
+  assert.equal(f.service.updateMember(f.actor('c1'),'m4',{name:'Sofía',status:'active'}).status,'active');f.close();
+});

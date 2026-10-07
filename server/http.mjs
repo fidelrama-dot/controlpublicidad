@@ -53,7 +53,10 @@ export function createHttpServer(service,{origin='http://127.0.0.1:4173'}={}){
       if(path==='/api/auth/logout'&&method==='POST'){service.logout(sessionToken);send(response,200,{loggedOut:true},{'Set-Cookie':'cp_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'});return;}
       if(path==='/api/bootstrap'&&method==='GET'){send(response,200,service.bootstrap(actor));return;}
       if(path==='/api/campaigns'&&method==='POST'){send(response,201,service.createCampaign(actor,await body(request,4096)));return;}
+      if(path==='/api/users'&&method==='POST'){send(response,201,service.createUser(actor,await body(request,4096)));return;}
       let match;
+      if((match=path.match(/^\/api\/users\/([^/]+)$/))&&method==='PATCH'){send(response,200,service.updateGlobalUser(actor,match[1],await body(request,4096)));return;}
+      if((match=path.match(/^\/api\/memberships\/([^/]+)\/transfer$/))&&method==='POST'){send(response,200,service.transferMember(actor,match[1],await body(request,4096)));return;}
       if((match=path.match(/^\/api\/memberships\/([^/]+)$/))&&method==='PATCH'){send(response,200,service.updateMember(actor,match[1],await body(request,4096)));return;}
       if(path==='/api/invitations'&&method==='POST'){send(response,201,service.invite(actor,await body(request,4096),origin));return;}
       if(path==='/api/invitations/accept'&&method==='POST'){const input=await body(request,1024);send(response,200,service.acceptInvite(actor,input.token));return;}

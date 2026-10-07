@@ -1,5 +1,5 @@
 import {createHash,randomBytes,randomInt,randomUUID,timingSafeEqual} from 'node:crypto';
-import {seedData,scopedMemberships,visibleCampaigns,canManageMember,visibleRecords,validateCampaign,TYPE_NAMES,finalFilename} from '../src/domain.mjs';
+import {seedData,scopedMemberships,visibleCampaigns,canManageMember,visibleRecords,validateCampaign,manualAssignment,transferTarget,TYPE_NAMES,finalFilename} from '../src/domain.mjs';
 import {CHUNK_BYTES} from './files.mjs';
 export class ApiError extends Error {constructor(status,message){super(message);this.status=status;}}
 export const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -75,7 +75,7 @@ export class Service {
     return m;
   }
   createCampaign(actor,input){
-    let valid;try{valid=validateCampaign(actor,input,this.data());}catch(error){throw new ApiError(403,error.message);}
+    let valid;try{valid=validateCampaign(actor,input,this.data());}catch(error){throw new ApiError(actor.role==='admin'?400:403,error.message);}
     if(!this.store.get("SELECT id FROM users WHERE id=? AND active=1 AND role='leader'",valid.leaderId))throw new ApiError(400,'Selecciona un líder activo.');
     const invitation=this.store.get("SELECT status FROM invitations WHERE user_id=? AND role='leader' AND membership_id IS NULL ORDER BY rowid DESC LIMIT 1",valid.leaderId);
     if(invitation&&invitation.status!=='accepted')throw new ApiError(409,'El líder debe aceptar su invitación antes de asignarlo a una campaña.');
@@ -89,10 +89,43 @@ export class Service {
     const m=this.member(actor,id,true),name=text(input.name,80,'Nombre'),status=input.status;
     if(!['active','inactive'].includes(status)||m.status==='invited')throw new ApiError(400,'La invitación requiere aceptación; elige un estado válido.');
     if(m.role==='leader'&&status!=='active')throw new ApiError(409,'La campaña debe conservar su líder activo.');
+    if(status==='active'&&m.parentId&&!this.store.get("SELECT id FROM memberships WHERE id=? AND status='active'",m.parentId))throw new ApiError(409,'Reactiva primero al superior directo.');
     if(status==='inactive'&&this.store.get("SELECT id FROM memberships WHERE parent_id=? AND status='active'",m.id))throw new ApiError(409,'Resuelve primero el equipo activo de este usuario.');
     this.store.transaction(()=>{this.store.run('UPDATE memberships SET status=?,display_name=? WHERE id=?',status,name,id);
       if(actor.role==='admin')this.store.run('UPDATE users SET name=? WHERE id=?',name,m.userId);this.audit(actor,'Actualizó pertenencia',id,m.campaignId);});
     return this.member(actor,id);
+  }
+  createUser(actor,input){
+    const name=text(input.name,80,'Nombre'),value=contact(input.contact);
+    let assignment;try{assignment=manualAssignment(this.data(),actor,input);}catch(error){throw new ApiError(403,error.message);}
+    const existing=this.store.get('SELECT * FROM users WHERE contact=?',value);
+    if(existing)throw new ApiError(409,'El contacto ya está registrado. Usa su ficha para modificarlo o moverlo.');
+    const userId=randomUUID(),memberId=assignment.campaignId?randomUUID():null;
+    this.store.transaction(()=>{
+      this.store.run('INSERT INTO users(id,name,contact,role) VALUES(?,?,?,?)',userId,name,value,assignment.role);
+      if(memberId)this.store.run("INSERT INTO memberships(id,campaign_id,user_id,role,parent_id,status,display_name) VALUES(?,?,?,?,?,'active',?)",memberId,assignment.campaignId,userId,assignment.role,assignment.parentId,name);
+      this.audit(actor,'Alta manual de usuario',memberId||userId,assignment.campaignId);
+    });
+    return {userId,membershipId:memberId,...assignment};
+  }
+  updateGlobalUser(actor,id,input){
+    if(actor.role!=='admin')throw new ApiError(403,'Solo el administrador puede modificar cuentas sin campaña.');
+    const u=this.store.get("SELECT * FROM users WHERE id=? AND role='leader'",id);
+    if(!u||this.store.get('SELECT id FROM memberships WHERE user_id=?',id))throw new ApiError(404,'Cuenta sin campaña no disponible.');
+    if(this.store.get("SELECT id FROM invitations WHERE user_id=? AND status='pending'",id))throw new ApiError(409,'Resuelve primero la invitación pendiente.');
+    const name=text(input.name,80,'Nombre');if(!['active','inactive'].includes(input.status))throw new ApiError(400,'Estado inválido.');
+    this.store.transaction(()=>{this.store.run('UPDATE users SET name=?,active=? WHERE id=?',name,input.status==='active'?1:0,id);this.store.run('DELETE FROM sessions WHERE user_id=?',id);this.audit(actor,'Actualizó cuenta sin campaña',id);});
+    return {id,name,status:input.status};
+  }
+  transferMember(actor,id,input){
+    let valid;try{valid=transferTarget(this.data(),actor,id,input.parentId);}catch(error){throw new ApiError(actor.role==='admin'?409:403,error.message);}
+    const {source,parent}=valid,newId=randomUUID();
+    this.store.transaction(()=>{
+      this.store.run("UPDATE memberships SET status='transferred' WHERE id=?",source.id);
+      this.store.run('INSERT INTO memberships(id,campaign_id,user_id,role,parent_id,status,display_name) VALUES(?,?,?,?,?,?,?)',newId,parent.campaignId,source.userId,'collaborator',parent.id,source.status,source.displayName);
+      this.audit(actor,'Trasladó colaborador de '+source.id+' a '+newId,newId,parent.campaignId);
+    });
+    return {membershipId:newId,previousMembershipId:source.id,campaignId:parent.campaignId,parentId:parent.id};
   }
   invite(actor,input,origin){
     if(actor.role==='collaborator')throw new ApiError(403,'Tu rol no permite invitar usuarios.');
@@ -110,7 +143,7 @@ export class Service {
     }
     const existing=this.store.get('SELECT * FROM users WHERE contact=?',value),userId=existing?.id||randomUUID(),memberId=role==='leader'?null:randomUUID(),id=randomUUID(),inviteToken=token();
     if(existing&&(existing.role!==role||!existing.active))throw new ApiError(409,'Este contacto ya tiene otro rol o está desactivado.');
-    if(memberId&&this.store.get('SELECT id FROM memberships WHERE campaign_id=? AND user_id=?',campaignId,userId))throw new ApiError(409,'El usuario ya pertenece a esta campaña.');
+    if(memberId&&this.store.get("SELECT id FROM memberships WHERE campaign_id=? AND user_id=? AND status!='transferred'",campaignId,userId))throw new ApiError(409,'El usuario ya pertenece a esta campaña.');
     if(this.store.get("SELECT id FROM invitations WHERE user_id=? AND role=? AND status='pending'",userId,role))throw new ApiError(409,'Ya existe una invitación pendiente para este usuario.');
     this.store.transaction(()=>{
       if(!existing)this.store.run('INSERT INTO users(id,name,contact,role) VALUES(?,?,?,?)',userId,name,value,role);
@@ -150,8 +183,9 @@ export class Service {
   }
   createRecord(actor,input){
     const id=uuid(input.id),d=this.data(),member=d.memberships.find(m=>m.id===input.membershipId);
-    if(actor.role!=='collaborator'||!member||member.userId!==actor.id||member.status!=='active')throw new ApiError(403,'Solo un colaborador activo puede registrar sus evidencias.');
-    let ancestor=member;while(ancestor.parentId){ancestor=d.memberships.find(m=>m.id===ancestor.parentId);if(!ancestor||ancestor.status!=='active')throw new ApiError(403,'La rama no está activa.');}
+    const sealed=this.store.get('SELECT * FROM records WHERE id=?',id);
+    if(actor.role!=='collaborator'||!member||member.userId!==actor.id||!sealed&&member.status!=='active')throw new ApiError(403,'Solo un colaborador activo puede registrar sus evidencias.');
+    if(!sealed){let ancestor=member;while(ancestor.parentId){ancestor=d.memberships.find(m=>m.id===ancestor.parentId);if(!ancestor||ancestor.status!=='active')throw new ApiError(403,'La rama no está activa.');}}
     const c=d.campaigns.find(c=>c.id===member.campaignId);
     if(!c||c.status!=='active'||!TYPE_NAMES[input.type]||!c.types.includes(input.type))throw new ApiError(400,'Tipo no permitido por la campaña.');
     if(!Array.isArray(input.media)||!input.media.length||input.media.length>13)throw new ApiError(400,'Agrega entre 1 y 13 evidencias.');
@@ -183,7 +217,8 @@ export class Service {
     const r=this.store.get('SELECT * FROM records WHERE id=?',id);
     if(!r)throw new ApiError(404,'Registro no disponible.');
     const manifest=JSON.parse(r.manifest),scope=scopedMemberships(this.data(),actor);
-    if(!scope.some(m=>m.id===r.membership_id)||write&&(actor.role!=='collaborator'||manifest.author.id!==actor.id))throw new ApiError(404,'Registro no disponible.');
+    const author=actor.role==='collaborator'&&manifest.author.id===actor.id;
+    if(!scope.some(m=>m.id===r.membership_id)&&!author||write&&!author)throw new ApiError(404,'Registro no disponible.');
     if(write&&r.status==='synced')throw new ApiError(409,'El registro ya fue confirmado y es inmutable.');
     return {...r,manifest};
   }

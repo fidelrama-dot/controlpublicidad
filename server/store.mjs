@@ -24,7 +24,7 @@ export class Store {
         id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL REFERENCES campaigns(id),
         user_id TEXT NOT NULL REFERENCES users(id), role TEXT NOT NULL CHECK(role IN ('leader','coordinator','collaborator')),
         parent_id TEXT REFERENCES memberships(id), status TEXT NOT NULL DEFAULT 'active',
-        display_name TEXT, UNIQUE(campaign_id,user_id)
+        display_name TEXT
       );
       CREATE UNIQUE INDEX IF NOT EXISTS one_leader_per_campaign ON memberships(campaign_id) WHERE role='leader';
       CREATE TRIGGER IF NOT EXISTS valid_parent BEFORE INSERT ON memberships
@@ -61,6 +61,26 @@ export class Store {
         id INTEGER PRIMARY KEY AUTOINCREMENT, actor_id TEXT NOT NULL REFERENCES users(id),
         campaign_id TEXT, action TEXT NOT NULL, target TEXT NOT NULL, at TEXT NOT NULL
       );
+    `);
+    // Version memberships on transfer so immutable records keep their original branch.
+    if(/UNIQUE\s*\(campaign_id\s*,\s*user_id\)/i.test(this.get("SELECT sql FROM sqlite_master WHERE name='memberships'").sql)){
+      this.db.exec(`PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;
+        CREATE TABLE memberships_new(id TEXT PRIMARY KEY,campaign_id TEXT NOT NULL REFERENCES campaigns(id),user_id TEXT NOT NULL REFERENCES users(id),role TEXT NOT NULL CHECK(role IN ('leader','coordinator','collaborator')),parent_id TEXT REFERENCES memberships(id),status TEXT NOT NULL DEFAULT 'active',display_name TEXT);
+        INSERT INTO memberships_new SELECT * FROM memberships;
+        DROP TABLE memberships; ALTER TABLE memberships_new RENAME TO memberships;
+        COMMIT; PRAGMA foreign_keys=ON;`);
+    }
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS one_leader_per_campaign ON memberships(campaign_id) WHERE role='leader';
+      CREATE UNIQUE INDEX IF NOT EXISTS current_campaign_user ON memberships(campaign_id,user_id) WHERE status!='transferred';
+      CREATE TRIGGER IF NOT EXISTS valid_parent BEFORE INSERT ON memberships BEGIN
+        SELECT CASE WHEN NEW.role='leader' AND NEW.parent_id IS NOT NULL THEN RAISE(ABORT,'Leader cannot have a parent') END;
+        SELECT CASE WHEN NEW.role!='leader' AND NOT EXISTS(SELECT 1 FROM memberships p WHERE p.id=NEW.parent_id AND p.campaign_id=NEW.campaign_id AND p.role=CASE NEW.role WHEN 'coordinator' THEN 'leader' ELSE 'coordinator' END) THEN RAISE(ABORT,'Invalid membership parent') END;
+      END;
+      CREATE TRIGGER IF NOT EXISTS valid_parent_update BEFORE UPDATE OF parent_id,campaign_id,role ON memberships BEGIN
+        SELECT CASE WHEN NEW.role='leader' AND NEW.parent_id IS NOT NULL THEN RAISE(ABORT,'Leader cannot have a parent') END;
+        SELECT CASE WHEN NEW.role!='leader' AND NOT EXISTS(SELECT 1 FROM memberships p WHERE p.id=NEW.parent_id AND p.campaign_id=NEW.campaign_id AND p.role=CASE NEW.role WHEN 'coordinator' THEN 'leader' ELSE 'coordinator' END) THEN RAISE(ABORT,'Invalid membership parent') END;
+      END;
     `);
   }
   get(sql,...params){return this.db.prepare(sql).get(...params);}

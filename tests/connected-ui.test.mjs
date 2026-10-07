@@ -54,6 +54,16 @@ test('connected screen signs in, creates campaigns and invitations, and saves sc
     click('[data-action="new-campaign"]');q('#campaign-name').value='Campaña conectada';q('#campaign-location').value='Morelia';change('#campaign-leader','l1');q('[name="types"][value="lona"]').checked=true;
     submit('#campaign-form');await waitFor(()=>d.querySelectorAll('.campaign-card').length===4,'created campaign');
     assert.equal(f.store.all('SELECT id FROM campaigns').length,4);
+    click('[data-nav="users"]');click('[data-action="new-user"]');
+    q('#manual-name').value='Colaborador manual';q('#manual-contact').value='manual-ui@example.invalid';change('#manual-role','collaborator');change('#manual-parent','m2');submit('#manual-user-form');
+    await waitFor(()=>!d.querySelector('#modal[open]'),'manual create');
+    const manualUser=f.store.get('SELECT id FROM users WHERE contact=?','manual-ui@example.invalid');
+    const manualMember=f.store.get('SELECT id FROM memberships WHERE user_id=?',manualUser.id);
+    click('.tree [data-action="user-detail"][data-id="'+manualMember.id+'"]');click('[data-action="move-user"]');change('#move-parent','m8');submit('#move-user-form');
+    await waitFor(()=>!d.querySelector('#modal[open]'),'manual transfer');
+    assert.equal(f.store.get('SELECT status FROM memberships WHERE id=?',manualMember.id).status,'transferred');
+    assert.equal(f.store.get("SELECT parent_id FROM memberships WHERE user_id=? AND status='active'",manualUser.id).parent_id,'m8');
+
     click('[data-nav="users"]');click('[data-action="invite-user"]');
     q('#invite-name').value='Líder nuevo';q('#invite-contact').value='leader-new@example.invalid';change('#invite-role','leader');submit('#invite-form');
     await waitFor(()=>d.querySelector('#invite-link'),'invitation link');

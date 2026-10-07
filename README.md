@@ -3,19 +3,23 @@
 Sistema de evidencias fotográficas y videos con GPS para campañas de lonas, espectaculares y bardas.
 
 ## Estado
-Versión 0.2: panel conectado a un servidor local de desarrollo, además del prototipo autónomo.
+Versión 0.3: panel conectado a un servidor local de desarrollo, además del prototipo autónomo.
 El servidor guarda usuarios, campañas, pertenencias, invitaciones y sesiones en SQLite; aplica permisos por rama en cada operación.
 Las invitaciones tienen contacto verificado, caducidad y uso único. El acceso local usa códigos aleatorios de prueba con vencimiento y límite de intentos.
 La API recibe archivos por fragmentos reanudables, los cifra en el servidor y solo confirma el registro tras verificar todos sus hashes.
-Pendientes: app Android con cámara/GPS y bóveda cifrada offline, proveedores de correo/SMS, alojamiento en nube, cartografía real, QR, traslado de equipos y gestión global de cuentas.
+Pendientes: app Android con cámara/GPS y bóveda cifrada offline, proveedores de correo/SMS, alojamiento en nube, cartografía real, QR y gestión global completa de cuentas.
 El panel conectado aún no captura archivos: muestra evidencias recibidas por la API. No es una APK ni un servicio de producción.
 
 ## Revisar las pantallas
+Vista privada de prueba para Chrome en Android: https://controlpublicidad-pruebas.fidelrama.chatgpt.site.
+Inicia sesión con la misma cuenta de ChatGPT propietaria del proyecto y usa después el código demo `123456`.
+Consulta [docs/ANDROID.md](docs/ANDROID.md). Este enlace sirve pantallas de demostración; no conecta a la API ni sincroniza datos entre dispositivos.
+
 Abre `index.html` en un navegador. Es un archivo autónomo, sin recursos externos.
 Continúa con el contacto de ejemplo y usa el código de demostración `123456`.
 El selector superior permite explorar los cuatro roles y comparar dos equipos.
 Todas las fotografías y videos son ejemplos; no se abre la cámara ni se consultan coordenadas del teléfono.
-Crear campañas, editar usuarios, generar invitaciones y sellar/sincronizar registros afecta solo a la demo del navegador.
+Crear campañas, dar de alta/baja usuarios manualmente, modificarlos, trasladar colaboradores, generar invitaciones y sellar/sincronizar registros afecta solo a la demo del navegador.
 Los borradores y cambios ficticios se guardan en localStorage sin cifrado. No introducir datos personales ni evidencias reales.
 Al abrir el archivo autónomo los permisos son reglas de interfaz de demostración. Al iniciar el servidor se validan también en cada solicitud de la API.
 El esquema del mapa no representa cartografía real; sus puntos abren registros de ejemplo.
@@ -37,7 +41,7 @@ Fuentes del panel: `src/domain.mjs`, `src/api.mjs`, `src/app.mjs`, `src/styles.c
 Servidor: `server/store.mjs`, `server/service.mjs`, `server/files.mjs`, `server/http.mjs` y `server/index.mjs`.
 `node build.mjs` genera el archivo autónomo `index.html`; no necesita dependencias instaladas.
 Las pruebas de dominio, servidor, cliente y pantallas conectadas usan datos ficticios, archivos temporales, HTTP real y JSDOM.
-Verificación: 27 pruebas automatizadas. Incluyen recuperación tras reinicio y corte de conexión, permisos de API, CSRF, invitaciones y sellado inmutable. Revisión visual en navegador pendiente.
+Verificación: 37 pruebas automatizadas. Incluyen recuperación tras reinicio y corte de conexión, permisos de API, CSRF, invitaciones y sellado inmutable. Revisión visual en navegador pendiente.
 
 ## Conservación en esta versión
 SQLite usa transacciones, WAL y sincronización completa. Los archivos recibidos se guardan por fragmentos con AES-256-GCM y escritura atómica.
@@ -75,7 +79,13 @@ Cada rol ve únicamente los usuarios autorizados por su alcance.
 | Colaborador | Ninguno | Sin acceso al módulo de usuarios |
 
 Funciones:
-- Listado y búsqueda por nombre, correo o celular; filtros por campaña, rol y estado.
+- Árbol de personas como vista principal: campañas, líder, coordinadores y colaboradores con ramas plegables. Los filtros mantienen visibles los superiores para conservar la jerarquía.
+- Tabla completa oculta inicialmente, desplegable debajo del árbol; búsqueda por nombre, correo o celular y filtros por campaña, rol y estado.
+- Ficha emergente con registros propios y totales de registros, fotos, videos y personas activas de su rama en esa campaña.
+- Alta manual con nombre, correo/celular y asignación activa; el servidor fija el rol y superior para líderes/coordinadores. El acceso posterior requiere verificar el contacto.
+- Modificación del nombre visible y estado, sin elevar roles ni alterar otras ramas.
+- Traslado de colaboradores por el administrador a un coordinador de destino; se seleccionan campaña, líder y coordinador. La asignación anterior pasa a historial y conserva sus evidencias; la nueva asignación recibe futuras capturas. Los traslados dentro de la misma campaña también conservan la rama histórica.
+- Líderes dados de alta sin campaña pueden modificarse y desactivarse; no se puede desactivar el líder asignado a una campaña.
 - Alta mediante invitación QR, correo o WhatsApp, con campaña, rol y superior fijados por servidor.
 - Estado de invitación pendiente, aceptada, vencida o revocada; compartir nuevamente, renovar o cancelar.
 - Ficha con nombre, correo/celular verificados, pertenencias por campaña, superior y estado.
@@ -157,7 +167,7 @@ Las correcciones de administradores se conservan como anotaciones auditadas; no 
 ## Arquitectura propuesta
 App móvil con almacenamiento privado cifrado y captura nativa; panel web para administración.
 API autenticada, base relacional y almacenamiento privado de medios con acceso autorizado.
-La plataforma móvil inicial y los proveedores de autenticación/nube quedan por confirmar.
+La plataforma móvil inicial será Android. Los proveedores de autenticación/nube quedan por confirmar.
 Tablas previstas: usuarios, dispositivos, campañas, pertenencias, invitaciones, registros, evidencias, tareas y auditoría.
 Las tareas se mencionan en los permisos; su flujo y campos quedan por definir.
 

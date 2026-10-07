@@ -46,9 +46,9 @@ test('user search, edit, invitations, hierarchy and role scope operate through t
   assert.doesNotMatch(a.q('tbody').textContent,/Carlos Vega|Pablo Ruiz/);
   assert.equal(a.document.querySelectorAll('[data-action="edit-user"][data-id="m4"]').length,0);
   assert.equal(a.document.querySelectorAll('[data-action="edit-user"][data-id="m2"]').length,1);
-  a.click('[data-action="users-layout"][data-layout="tree"]');
+  assert.equal(a.q("#users-table").open,false);
   assert.match(a.q('.tree').textContent,/Diego Méndez/);
-  a.change('#demo-role','c1');a.click('[data-nav="users"]');a.click('[data-action="users-layout"][data-layout="list"]');
+  a.change('#demo-role','c1');a.click('[data-nav="users"]');
   assert.equal(a.document.querySelectorAll('tbody tr').length,3);
   assert.doesNotMatch(a.q('tbody').textContent,/Valeria Cruz/);
   assert.deepEqual(a.errors,[]);a.close();
@@ -94,5 +94,46 @@ test('capture enforces limits, restores draft, seals and simulates one-time sync
   a.click('[data-action="record-media"][data-seq="11"]');
   assert.match(a.q('.media-placeholder').textContent,/Video de ejemplo/);
   assert.equal(a.document.querySelectorAll('#modal [data-action="edit-record"]').length,0);
+  assert.deepEqual(a.errors,[]);a.close();
+});
+test('people tree is primary, filters keep ancestors, and profile totals include descendants',()=>{
+  const a=createApp();a.login();a.click('[data-nav="users"]');
+  assert.equal(a.q('#users-table').open,false);
+  assert.equal(a.q('[data-branch="m1"]').open,true);assert.equal(a.q('[data-branch="m2"]').open,false);
+  a.click('.tree [data-action="user-detail"][data-id="m1"]');
+  assert.equal(a.q('[data-total="records"]').textContent,'14');
+  assert.equal(a.q('[data-total="people"]').textContent,'6');
+  a.click('[data-action="close-dialog"]');a.input('#user-search','Sofía');
+  assert.match(a.q('.tree').textContent,/Mariana Torres/);assert.match(a.q('.tree').textContent,/Diego Méndez/);
+  assert.doesNotMatch(a.q('.tree').textContent,/Elena García|Valeria Cruz/);
+  assert.equal(a.q('[data-branch="m2"]').open,true);
+  a.q('#users-table').open=true;assert.equal(a.document.querySelectorAll('tbody tr').length,1);
+  assert.deepEqual(a.errors,[]);a.close();
+});
+test('manual creation, profile deactivation and reactivation preserve sample users',()=>{
+  const a=createApp();a.login();a.click('[data-nav="users"]');a.click('[data-action="new-user"]');
+  a.input('#manual-name','Colaborador nuevo');a.input('#manual-contact','nuevo@example.invalid');a.change('#manual-role','collaborator');
+  a.change('#manual-parent','m2');a.submit('#manual-user-form');
+  const saved=JSON.parse(a.dom.window.localStorage.getItem('controlpublicidad-screens-v1')).data;
+  const u=saved.users.find(u=>u.contact==='nuevo@example.invalid'),m=saved.memberships.find(m=>m.userId===u.id);
+  assert.equal(m.parentId,'m2');assert.equal(saved.users.length,11);
+  a.click('.tree [data-action="user-detail"][data-id="'+m.id+'"]');a.click('[data-action="deactivate-user"]');a.submit('#edit-user-form');
+  a.click('.tree [data-action="user-detail"][data-id="'+m.id+'"]');a.click('#modal [data-action="edit-user"]');
+  a.change('#edit-status','active');a.input('#edit-name','Nombre modificado');a.submit('#edit-user-form');
+  assert.match(a.q('.tree').textContent,/Nombre modificado/);
+  assert.match(a.q('.tree').textContent,/Sofía López|Mariana Torres/);
+  assert.deepEqual(a.errors,[]);a.close();
+});
+test('admin moves collaborator to another leader without relocating historical evidence',()=>{
+  const a=createApp();a.login();a.click('[data-nav="users"]');a.click('.tree [data-action="user-detail"][data-id="m4"]');
+  a.click('[data-action="move-user"]');a.change('#move-parent','m8');a.submit('#move-user-form');
+  const saved=JSON.parse(a.dom.window.localStorage.getItem('controlpublicidad-screens-v1')).data;
+  const old=saved.memberships.find(m=>m.id==='m4'),next=saved.memberships.find(m=>m.userId==='f1'&&m.status==='active');
+  assert.equal(old.status,'transferred');assert.equal(old.parentId,'m2');assert.equal(next.parentId,'m8');assert.equal(next.campaignId,'p2');
+  assert.ok(saved.records.filter(r=>r.membershipId==='m4').every(r=>r.campaignId==='p1'));
+  a.change('#demo-role','l2');a.click('[data-nav="users"]');
+  assert.match(a.q('.tree').textContent,/Sofía López/);
+  a.click('.tree [data-action="user-detail"][data-id="'+next.id+'"]');
+  assert.equal(a.q('[data-total="records"]').textContent,'0');assert.equal(a.document.querySelectorAll('#modal [data-action="move-user"]').length,0);
   assert.deepEqual(a.errors,[]);a.close();
 });

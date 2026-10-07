@@ -20,6 +20,9 @@ Los códigos nunca se exponen fuera del modo de desarrollo; el arranque de produ
 | Operación | Ruta | Alcance |
 | --- | --- | --- |
 | Datos del panel | GET /api/bootstrap | Campañas, usuarios y registros autorizados |
+| Alta manual de usuario | POST /api/users | Administrador o superior directo; rol/parent fijados en servidor |
+| Editar líder sin campaña | PATCH /api/users/:id | Administrador; nombre y estado, sin invitación pendiente |
+| Mover colaborador | POST /api/memberships/:id/transfer | Solo administrador; coordinador activo de destino |
 | Crear campaña | POST /api/campaigns | Administrador |
 | Editar nombre por campaña/estado | PATCH /api/memberships/:id | Superior directo o administrador |
 | Crear invitación | POST /api/invitations | Rol inferior y rama propios |
@@ -33,6 +36,18 @@ Las invitaciones requieren nombre y contacto. Para coordinadores/colaboradores: 
 Para un líder/coordinador, el servidor fija el rol inferior y su propia pertenencia como superior, aunque el cliente intente cambiar esos valores.
 Las invitaciones caducan a los 7 días. Sus tokens se guardan como hash; el enlace completo solo se devuelve al crear o renovar.
 El enlace del servidor local aún no es accesible desde teléfonos de otras personas.
+
+## Altas manuales, bajas y traslados
+
+`POST /api/users`: `name`, `contact`, `role`, `campaignId`, `parentId`. El administrador puede crear un líder sin campaña; líderes y coordinadores solo crean su rol inferior en su propia rama. Contactos duplicados se rechazan; se normalizan correos y celulares E.164. El alta queda activa y auditada, sin invitación ni verificación ficticia de identidad: el usuario verifica su contacto al iniciar sesión.
+
+`PATCH /api/memberships/:id`: nombre visible y estado activo/inactivo. La baja es por campaña, no borra evidencias. No se desactiva el líder de campaña ni un superior con personas activas. Las asignaciones históricas trasladadas no se reactivan ni editan.
+
+`POST /api/memberships/:id/transfer` con `{"parentId":"ID del coordinador de destino"}`. Solo el administrador traslada colaboradores activos/inactivos. El destino debe ser un coordinador activo bajo un líder activo; se rechazan el mismo equipo y pertenencias duplicadas de destino.
+
+La operación es atómica y crea otra pertenencia, conservando el estado activo/inactivo. La anterior pasa a `transferred`, sin cambiar campaña, superior ni registros originales. La rama de origen mantiene acceso a sus evidencias históricas; el destino recibe únicamente nuevas capturas. El autor puede terminar una subida ya sellada antes del traslado. Nuevos manifiestos no se aceptan en una asignación trasladada. Los borradores aún exclusivos del teléfono deben finalizarse y enviarse antes de mover a la persona; su recuperación offline requiere la futura app Android.
+
+SQLite migra automáticamente la restricción original para permitir pertenencias históricas y una única pertenencia actual por campaña/usuario, manteniendo las claves foráneas.
 
 ## Envío de evidencias
 

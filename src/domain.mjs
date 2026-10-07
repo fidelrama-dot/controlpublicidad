@@ -67,6 +67,7 @@ export function visibleCampaigns(data,actor) {
 }
 export function canManageMember(data,actor,target) {
   if(!target) return false;
+  if(target.status==='transferred') return false;
   if(actor.role==='admin') return true;
   if(target.role!==CHILD_ROLE[actor.role]) return false;
   const parent=data.memberships.find(m=>m.id===target.parentId);
@@ -74,7 +75,31 @@ export function canManageMember(data,actor,target) {
 }
 export function visibleRecords(data,actor) {
   const scope=new Set(scopedMemberships(data,actor).map(m=>m.id));
-  return data.records.filter(r=>scope.has(r.membershipId));
+  return data.records.filter(r=>scope.has(r.membershipId)||actor.role==='collaborator'&&data.memberships.some(m=>m.id===r.membershipId&&m.userId===actor.id));
+}
+export function teamSummary(data,memberId) {
+  const scope=descendants(data,memberId),members=data.memberships.filter(m=>scope.has(m.id));
+  const records=data.records.filter(r=>scope.has(r.membershipId)),media=records.flatMap(r=>r.media);
+  return {people:new Set(members.filter(m=>m.status==='active').map(m=>m.userId)).size,records:records.length,photos:media.filter(m=>m.kind==='photo').length,videos:media.filter(m=>m.kind==='video').length,own:records.filter(r=>r.membershipId===memberId).length};
+}
+export function manualAssignment(data,actor,input) {
+  if(actor.role==='collaborator')throw Error('Tu rol no permite dar de alta usuarios.');
+  const role=actor.role==='admin'?input.role:CHILD_ROLE[actor.role];
+  if(!['leader','coordinator','collaborator'].includes(role)||role==='leader'&&actor.role!=='admin')throw Error('Rol inválido.');
+  if(role==='leader')return {role,campaignId:null,parentId:null};
+  const parent=actor.role==='admin'?data.memberships.find(m=>m.id===input.parentId):data.memberships.find(m=>m.userId===actor.id&&m.campaignId===input.campaignId&&m.status==='active');
+  if(!parent||parent.status!=='active'||parent.campaignId!==input.campaignId||parent.role!==(role==='coordinator'?'leader':'coordinator')||!data.campaigns.some(c=>c.id===parent.campaignId&&c.status==='active'))throw Error('Selecciona un superior activo en la campaña.');
+  if(actor.role!=='admin'&&input.parentId&&input.parentId!==parent.id)throw Error('No puedes dar de alta usuarios en otra rama.');
+  return {role,campaignId:parent.campaignId,parentId:parent.id};
+}
+export function transferTarget(data,actor,memberId,parentId) {
+  if(actor.role!=='admin')throw Error('Solo el administrador puede mover colaboradores entre equipos.');
+  const source=data.memberships.find(m=>m.id===memberId),parent=data.memberships.find(m=>m.id===parentId);
+  if(!source||source.role!=='collaborator'||!['active','inactive'].includes(source.status))throw Error('Selecciona un colaborador activo o inactivo.');
+  if(!parent||parent.role!=='coordinator'||parent.status!=='active'||!data.memberships.some(m=>m.id===parent.parentId&&m.role==='leader'&&m.status==='active')||!data.campaigns.some(c=>c.id===parent.campaignId&&c.status==='active'))throw Error('Selecciona un coordinador activo de destino.');
+  if(source.parentId===parent.id)throw Error('El colaborador ya pertenece a este equipo.');
+  if(data.memberships.some(m=>m.id!==source.id&&m.userId===source.userId&&m.campaignId===parent.campaignId&&m.status!=='transferred'))throw Error('El colaborador ya pertenece a la campaña de destino.');
+  return {source,parent};
 }
 export function dateInMexico(iso) {
   const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/Mexico_City',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(iso));
@@ -87,7 +112,7 @@ export function filterRecords(records,{campaign='',types=[],from='',to=''}={}) {
 export function validateCampaign(actor,input,data) {
   if(actor.role!=='admin') throw Error('Solo el administrador puede crear campañas.');
   if(!input.name?.trim()||!input.location?.trim()) throw Error('Completa el nombre y la ubicación.');
-  if(!data.users.some(u=>u.id===input.leaderId&&u.role==='leader')) throw Error('Selecciona un líder.');
+  if(!data.users.some(u=>u.id===input.leaderId&&u.role==='leader'&&u.active!==false)) throw Error('Selecciona un líder activo.');
   if(!input.types?.length||new Set(input.types).size!==input.types.length||input.types.some(t=>!TYPE_NAMES[t])) throw Error('Selecciona uno o varios tipos válidos.');
   return {...input,name:input.name.trim(),location:input.location.trim()};
 }

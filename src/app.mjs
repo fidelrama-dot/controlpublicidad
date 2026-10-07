@@ -1,4 +1,4 @@
-import { TYPE_NAMES, ROLE_NAMES, CHILD_ROLE, seedData, scopedMemberships, visibleCampaigns, canManageMember, visibleRecords, filterRecords, validateCampaign, assertCapture, assertEditable, finalFilename, dateInMexico } from './domain.mjs';
+import { TYPE_NAMES, ROLE_NAMES, CHILD_ROLE, seedData, scopedMemberships, visibleCampaigns, canManageMember, visibleRecords, filterRecords, validateCampaign, assertCapture, assertEditable, finalFilename, dateInMexico, descendants, teamSummary, manualAssignment, transferTarget } from './domain.mjs';
 import { ApiClient } from './api.mjs';
 
 const app=document.querySelector('#app');
@@ -9,19 +9,20 @@ const api=serverMode?new ApiClient():null;
 let data=serverMode?{users:[],campaigns:[],memberships:[],records:[],invitations:[],audit:[],drafts:{}}:seedData();
 if(!serverMode)try { const saved=JSON.parse(localStorage.getItem(STORAGE_KEY)); if(saved?.version===1) data=saved.data; } catch {}
 data.drafts ||= {};
-const state={logged:false,actorId:'a1',view:'dashboard',loginMode:'email',loginStep:1,loginContact:'',developmentCode:'',inviteLinks:{},usersSearch:'',userCampaign:'',userRole:'',userStatus:'',usersLayout:'list',filters:{campaign:'',types:[],from:'',to:''},successId:null};
+const state={logged:false,actorId:'a1',view:'dashboard',loginMode:'email',loginStep:1,loginContact:'',developmentCode:'',inviteLinks:{},usersSearch:'',userCampaign:'',userRole:'',userStatus:'',tableOpen:false,branchOpen:{},filters:{campaign:'',types:[],from:'',to:''},successId:null};
 const pages={dashboard:'Resumen',campaigns:'Campañas',users:'Usuarios y equipos',evidence:'Evidencias',map:'Mapa de evidencias',capture:'Nuevo registro',sync:'Mis envíos'};
 const ids=()=>globalThis.crypto?.randomUUID?.()||'demo-'+Date.now()+'-'+Math.random().toString(36).slice(2);
 const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const actor=()=>data.users.find(u=>u.id===state.actorId);
 const user=id=>data.users.find(u=>u.id===id);
 const memberUser=m=>({...user(m.userId),name:m.displayName||user(m.userId)?.name});
-const canEdit=m=>!m.global&&(!serverMode||m.status!=='invited')&&canManageMember(data,actor(),m);
+const canEdit=m=>m.status!=='invited'&&m.status!=='transferred'&&(m.global?actor().role==='admin':canManageMember(data,actor(),m));
+const canMove=m=>actor().role==='admin'&&m.role==='collaborator'&&['active','inactive'].includes(m.status);
 const campaign=id=>data.campaigns.find(c=>c.id===id);
 const initials=name=>name.split(/\s+/).slice(0,2).map(x=>x[0]).join('');
 const personAvatar=(u,large=false)=>`<span class="avatar ${large?'large':''}">${e(initials(u?.name||'Equipo'))}</span>`;
 const rolePill=role=>`<span class="pill ${role==='leader'?'purple':role==='collaborator'?'green':''}">${ROLE_NAMES[role]}</span>`;
-const statusPill=status=>`<span class="pill ${status==='active'||status==='synced'?'green':status==='pending'||status==='invited'?'amber':''}"><i class="dot"></i>${{active:'Activo',inactive:'Inactivo',invited:'Invitación pendiente',pending:'Pendiente · demo',synced:serverMode?'Confirmado':'Sincronizado · demo',draft:'Borrador · demo'}[status]||e(status)}</span>`;
+const statusPill=status=>`<span class="pill ${status==='active'||status==='synced'?'green':status==='pending'||status==='invited'?'amber':''}"><i class="dot"></i>${{active:'Activo',inactive:'Inactivo',transferred:'Trasladado · historial',invited:'Invitación pendiente',pending:'Pendiente · demo',synced:serverMode?'Confirmado':'Sincronizado · demo',draft:'Borrador · demo'}[status]||e(status)}</span>`;
 const typePill=t=>`<span class="pill">${TYPE_NAMES[t]}</span>`;
 const fmtDate=(iso,short=false)=>new Intl.DateTimeFormat('es-MX',{timeZone:'America/Mexico_City',day:'2-digit',month:'short',...(short?{}:{hour:'2-digit',minute:'2-digit'})}).format(new Date(iso));
 const save=()=>{if(serverMode)return true;try{localStorage.setItem(STORAGE_KEY,JSON.stringify({version:1,data}));return true;}catch{toast('No se pudo guardar la demo en este navegador. Mantén esta ventana abierta.');return false;}};
@@ -162,15 +163,15 @@ function campaignsPage(){
 function userList(){
   const needle=state.usersSearch.toLowerCase();
   const all=scopedMemberships(data,actor());
-  if(serverMode&&actor().role==='admin'){
+  if(actor().role==='admin'){
     for(const u of data.users.filter(u=>u.role==='leader'&&!data.memberships.some(m=>m.userId===u.id))){
       const inv=data.invitations.find(i=>i.userId===u.id&&i.status==='pending');
-      all.push({id:'global:'+u.id,userId:u.id,role:'leader',campaignId:null,parentId:null,status:inv?'invited':'active',global:true});
+      all.push({id:'global:'+u.id,userId:u.id,role:'leader',campaignId:null,parentId:null,status:inv?'invited':u.active===false?'inactive':'active',global:true});
     }
   }
   return all.filter(m=>{
-    const u=user(m.userId);
-    return (!state.userCampaign||m.campaignId===state.userCampaign)&&(!state.userRole||m.role===state.userRole)&&(!state.userStatus||m.status===state.userStatus)&&(!needle||`${u?.name} ${u?.contact}`.toLowerCase().includes(needle));
+    const u=memberUser(m);
+    return (!state.userCampaign||m.campaignId===state.userCampaign)&&(!state.userRole||m.role===state.userRole)&&(state.userStatus?m.status===state.userStatus:m.status!=='transferred')&&(!needle||`${u?.name} ${u?.contact}`.toLowerCase().includes(needle));
   });
 }
 function usersPage(){
@@ -178,17 +179,17 @@ function usersPage(){
   const active=new Set(scope.filter(m=>m.status==='active').map(m=>m.userId)).size;
   const pending=scope.filter(m=>m.status==='invited').length;
   const admins=actor().role==='admin';
-  return `${pageHead('Usuarios y equipos','Personas conectadas, responsabilidades claras.',`<button class="btn" data-action="invite-user">${icon('plus',17)} Invitar usuario</button>`,'ADMINISTRACIÓN DE USUARIOS')}
+  return `${pageHead('Usuarios y equipos','Tu equipo, de un vistazo.',`<div class="user-head-actions"><button class="btn secondary" data-action="invite-user">${icon('mail',17)} Invitar</button><button class="btn" data-action="new-user">${icon('plus',17)} Alta manual</button></div>`,'ADMINISTRACIÓN DE USUARIOS')}
   <div class="stats">${stat('Personas activas',active,'Dentro de tu alcance','users',true)}${stat('Coordinadores',scope.filter(m=>m.role==='coordinator'&&m.status==='active').length,'Equipos en operación','layers')}${stat('Colaboradores',scope.filter(m=>m.role==='collaborator'&&m.status==='active').length,'Captura de evidencias','camera')}${stat('Invitaciones',pending,'Pendientes de aceptación','mail')}</div>
   <div class="notice">${icon('shield',17)}<span>${admins?'Puedes administrar todos los equipos. Cada campaña mantiene un único líder.':actor().role==='leader'?'Puedes administrar tus coordinadores y consultar sus colaboradores. Cada coordinador administra su propia rama.':'Solo puedes administrar colaboradores asignados directamente a ti.'}</span></div>
   <div class="filters"><div class="search">${icon('search',16)}<input id="user-search" type="search" value="${e(state.usersSearch)}" aria-label="Buscar usuarios" placeholder="Buscar por nombre, correo o celular"></div>
   <select id="user-campaign" aria-label="Filtrar usuarios por campaña"><option value="">Todas las campañas</option>${campaignOptions(state.userCampaign)}</select>
   <select id="user-role" aria-label="Filtrar usuarios por rol"><option value="">Todos los roles</option>${['leader','coordinator','collaborator'].map(r=>`<option value="${r}" ${state.userRole===r?'selected':''}>${ROLE_NAMES[r]}</option>`).join('')}</select>
-  <select id="user-status" aria-label="Filtrar usuarios por estado"><option value="">Todos los estados</option>${[['active','Activos'],['inactive','Inactivos'],['invited','Invitados']].map(([v,n])=>`<option value="${v}" ${state.userStatus===v?'selected':''}>${n}</option>`).join('')}</select>
-  <div class="tabs"><button class="${state.usersLayout==='list'?'active':''}" data-action="users-layout" data-layout="list">Listado</button><button class="${state.usersLayout==='tree'?'active':''}" data-action="users-layout" data-layout="tree">Jerarquía</button></div></div>
-  ${state.usersLayout==='list'?usersTable(members):usersTree(members)}
+  <select id="user-status" aria-label="Filtrar usuarios por estado"><option value="">Todos los estados actuales</option>${[['active','Activos'],['inactive','Inactivos'],['invited','Invitados'],['transferred','Historial de traslados']].map(([v,n])=>`<option value="${v}" ${state.userStatus===v?'selected':''}>${n}</option>`).join('')}</select></div>
+  ${usersTree(members)}
+  <details class="users-table-disclosure" id="users-table" ${state.tableOpen?'open':''}><summary>${icon('grid',18)}<span><strong>Ver tabla completa</strong><small>Contacto, campaña, superior y acciones · ${members.length} asignaciones</small></span>${icon('chevron',16)}</summary>${usersTable(members)}</details>
   <div class="table-footer"><span>${members.length} pertenencias en ${new Set(members.map(m=>m.campaignId)).size} campañas</span><span>Una baja conserva la autoría y las evidencias.</span></div>
-  ${data.audit.length?`<section class="card" style="margin-top:15px"><h3>Últimos cambios en la demo</h3><p class="sub" style="font-size:11px">${data.audit.filter(a=>admins||a.actorId===actor().id).slice(-3).reverse().map(a=>`${e(user(a.actorId)?.name)} · ${e(a.action)} · ${fmtDate(a.at)}`).join('<br>')||'Sin cambios realizados por ti.'}</p></section>`:''}`;
+  ${data.audit.length?`<section class="card" style="margin-top:15px"><h3>Últimos cambios${serverMode?'':' en la demo'}</h3><p class="sub" style="font-size:11px">${data.audit.filter(a=>admins||a.actorId===actor().id).slice(-3).reverse().map(a=>`${e(user(a.actorId)?.name)} · ${e(a.action)} · ${fmtDate(a.at)}`).join('<br>')||'Sin cambios realizados por ti.'}</p></section>`:''}`;
 }
 function usersTable(members){
   if(!members.length) return `<div class="card">${empty('No encontramos usuarios')}</div>`;
@@ -200,10 +201,16 @@ function usersTable(members){
 }
 function usersTree(members){
   if(!members.length) return `<div class="card">${empty('No encontramos usuarios')}</div>`;
-  const included=new Set(members.map(m=>m.id));
-  const roots=members.filter(m=>!included.has(m.parentId));
-  const node=m=>`<div><div class="person">${personAvatar(user(m.userId))}<div><strong>${e(user(m.userId)?.name)}</strong><small>${ROLE_NAMES[m.role]} · ${e(campaign(m.campaignId)?.name)}</small></div><button class="icon-btn" data-action="user-detail" data-id="${m.id}" aria-label="Ver ${e(user(m.userId)?.name)}">${icon('eye',15)}</button></div>${members.some(x=>x.parentId===m.id)?`<div class="tree-level">${members.filter(x=>x.parentId===m.id).map(node).join('')}</div>`:''}</div>`;
-  return `<div class="tree">${roots.map(m=>`<section class="tree-branch">${node(m)}</section>`).join('')}</div>`;
+  const matches=new Set(members.map(m=>m.id)),included=new Map(members.map(m=>[m.id,m])),scope=scopedMemberships(data,actor());
+  for(const m of members){let p=scope.find(x=>x.id===m.parentId);while(p&&!included.has(p.id)){included.set(p.id,p);p=scope.find(x=>x.id===p.parentId);}}
+  const all=[...included.values()],filtered=Boolean(state.usersSearch||state.userRole||state.userStatus);
+  const node=m=>{
+    const u=memberUser(m),children=all.filter(x=>x.parentId===m.id),totals=teamSummary(data,m.id),open=filtered||(state.branchOpen[m.id]??m.role==='leader');
+    const person=`<button class="tree-person ${matches.has(m.id)?'':'context-person'}" data-action="user-detail" data-id="${m.id}" aria-label="Ver ${e(u.name)}">${personAvatar(u)}<span class="tree-person-text"><strong>${e(u.name)}</strong><small>${ROLE_NAMES[m.role]}${matches.has(m.id)?'':' · Superior'}${m.status!=='active'?' · '+({inactive:'Inactivo',invited:'Invitado',transferred:'Historial'}[m.status]||m.status):''}</small></span><span class="tree-total"><strong>${totals.records}</strong><small>registros</small></span>${icon('eye',16)}</button>`;
+    return children.length?`<details class="person-branch" data-branch="${m.id}" ${open?'open':''}><summary aria-label="Desplegar equipo de ${e(u.name)}"><span class="branch-chevron">${icon('chevron',16)}</span>${person}</summary><div class="people-children">${children.map(node).join('')}</div></details>`:`<div class="tree-leaf">${person}</div>`;
+  };
+  const groups=[...new Set(all.map(m=>m.campaignId))];
+  return `<section class="people-tree"><div class="section-heading"><div><h2>Estructura del equipo</h2><p>Despliega una rama o toca una persona para ver su ficha.</p></div><div class="tree-tools"><button data-action="expand-teams">Expandir</button><button data-action="collapse-teams">Plegar</button></div></div>${actor().role==='admin'?`<button class="tree-admin" data-action="admin-detail">${personAvatar(actor())}<span><strong>${e(actor().name)}</strong><small>Administrador · ${data.campaigns.length} campañas</small></span>${icon('shield',18)}</button>`:''}<div class="tree">${groups.map(cid=>{const group=all.filter(m=>m.campaignId===cid),roots=group.filter(m=>!included.has(m.parentId));return `<section class="tree-branch"><div class="tree-campaign">${icon('flag',17)}<span>${e(campaign(cid)?.name||'Líderes sin campaña')}</span><small>${group.filter(m=>matches.has(m.id)).length} asignaciones</small></div>${roots.map(node).join('')}</section>`;}).join('')}</div></section>`;
 }
 function recordFilters(){
   const availableTypes=[...new Set((state.filters.campaign?[campaign(state.filters.campaign)]:visibleCampaigns(data,actor())).flatMap(c=>c?.types||[]))];
@@ -265,7 +272,7 @@ function showDialog(title,body,foot=''){
   modal.innerHTML=`<div class="dialog-head"><h2 id="dialog-title">${title}</h2><button class="icon-btn" data-action="close-dialog" aria-label="Cerrar ventana">${icon('close',18)}</button></div><div class="dialog-body">${body}</div>${foot?`<div class="dialog-foot">${foot}</div>`:''}`;
   if(!modal.open) modal.showModal();
 }
-function allowedMember(id){return scopedMemberships(data,actor()).find(m=>m.id===id)||(serverMode&&actor().role==='admin'?userList().find(m=>m.global&&m.id===id):null);}
+function allowedMember(id){return scopedMemberships(data,actor()).find(m=>m.id===id)||(actor().role==='admin'&&id.startsWith('global:')&&user(id.slice(7))?{id,userId:id.slice(7),global:true,role:'leader',status:data.invitations.some(i=>i.userId===id.slice(7)&&i.status==='pending')?'invited':user(id.slice(7))?.active===false?'inactive':'active'}:null);}
 function userDialog(id,edit=false){
   const m=allowedMember(id);
   if(!m||edit&&!canEdit(m)){toast('No tienes permiso para modificar este usuario.');return;}
@@ -273,18 +280,31 @@ function userDialog(id,edit=false){
   if(edit){
     const activeChildren=data.memberships.some(x=>x.parentId===m.id&&x.status==='active');
     showDialog('Editar usuario',`<div class="row">${personAvatar(u,true)}<div><h3>${e(u.name)}</h3><p class="sub" style="font-size:11px">${ROLE_NAMES[m.role]} · ${e(campaign(m.campaignId)?.name)}</p></div></div><form id="edit-user-form" data-id="${m.id}" class="stack">${field('Nombre visible','edit-name',`<input id="edit-name" name="name" required maxlength="80" value="${e(u.name)}">`)}
-    ${field('Estado en esta campaña','edit-status',`<select id="edit-status" name="status"><option value="active" ${m.status==='active'?'selected':''}>Activo</option><option value="inactive" ${m.status==='inactive'?'selected':''} ${activeChildren?'disabled':''}>Inactivo</option>${m.status==='invited'?'<option value="invited" selected>Invitación pendiente</option>':''}</select>`)}
+    ${field(m.global?'Estado de la cuenta':'Estado en esta campaña','edit-status',`<select id="edit-status" name="status"><option value="active" ${m.status==='active'?'selected':''}>Activo</option><option value="inactive" ${m.status==='inactive'?'selected':''} ${activeChildren||m.role==='leader'&&!m.global?'disabled':''}>Inactivo</option></select>`)}
     <div class="notice">${icon('shield',16)}<span>La baja afecta solo a esta campaña y conserva las evidencias. ${activeChildren?'Este usuario tiene personas activas a su cargo; primero debe resolverse su equipo.':''}</span></div>
     <p class="muted" style="font-size:11px">Contacto: ${e(u.contact)}<br>Cambiar el correo o celular requerirá verificación en la versión con servidor.</p><div class="form-error" id="edit-error"></div></form>`,`<button class="btn secondary" data-action="close-dialog">Cancelar</button><button class="btn" type="submit" form="edit-user-form">Guardar cambios</button>`);
   }else{
-    const records=ownRecords().filter(r=>r.membershipId===m.id);
+    const totals=teamSummary(data,m.id);
     const inv=data.invitations.find(i=>(i.membershipId===m.id||(m.global&&i.userId===m.userId))&&i.status==='pending');
-    showDialog('Ficha del usuario',`<div class="row">${personAvatar(u,true)}<div><h2>${e(u.name)}</h2><div class="row" style="margin-top:9px">${rolePill(m.role)}${statusPill(m.status)}</div></div></div><div class="details-grid"><div><small>Correo o celular · ejemplo</small><strong>${e(u.contact)}</strong></div><div><small>Campaña</small><strong>${e(campaign(m.campaignId)?.name)}</strong></div><div><small>Superior</small><strong>${e(parent?user(parent.userId)?.name:'Administrador')}</strong></div><div><small>Registros de esta persona</small><strong>${records.length}</strong></div></div><div class="notice">${icon('shield',16)}<span>${canManageMember(data,actor(),m)?'Este usuario está dentro de tu alcance de administración.':'Tienes permiso de consulta. Su superior directo administra este usuario.'}</span></div>`,`<button class="btn secondary" data-action="close-dialog">Cerrar</button>${inv&&canManageMember(data,actor(),m)?`<button class="btn secondary" data-action="view-invitation" data-id="${inv.id}">Ver invitación</button>`:''}${canEdit(m)?`<button class="btn" data-action="edit-user" data-id="${m.id}">${icon('edit',16)} Editar usuario</button>`:''}`);
+    showDialog('Ficha del usuario',`<div class="row">${personAvatar(u,true)}<div><h2>${e(u.name)}</h2><div class="row" style="margin-top:9px">${rolePill(m.role)}${statusPill(m.status)}</div></div></div><div class="details-grid"><div><small>Correo o celular${serverMode?'':' · ejemplo'}</small><strong>${e(u.contact)}</strong></div><div><small>Campaña</small><strong>${e(campaign(m.campaignId)?.name||'Sin asignar')}</strong></div><div><small>Superior directo</small><strong>${e(parent?memberUser(parent).name:'Administrador')}</strong></div><div><small>Registros propios</small><strong>${totals.own}</strong></div></div><section class="team-summary"><h3>Resumen de su equipo</h3><div class="team-totals"><div><strong data-total="records">${totals.records}</strong><small>Registros</small></div><div><strong data-total="photos">${totals.photos}</strong><small>Fotos</small></div><div><strong data-total="videos">${totals.videos}</strong><small>Videos</small></div><div><strong data-total="people">${totals.people}</strong><small>Personas activas</small></div></div><p class="sub">Totales de esta campaña, incluida la persona seleccionada y las evidencias históricas de su rama.</p></section><div class="user-management-actions">${canEdit(m)?`<button class="btn secondary" data-action="edit-user" data-id="${m.id}">${icon('edit',16)} Modificar</button>`:''}${canMove(m)?`<button class="btn secondary" data-action="move-user" data-id="${m.id}">${icon('arrow',16)} Mover de equipo / líder</button>`:''}${canEdit(m)&&m.status==='active'&&(m.global||m.role!=='leader')&&!data.memberships.some(x=>x.parentId===m.id&&x.status==='active')?`<button class="btn danger" data-action="deactivate-user" data-id="${m.id}">Dar de baja</button>`:''}</div><div class="notice">${icon('shield',16)}<span>${canEdit(m)?'Puedes modificar este usuario. La baja conserva sus registros.':'Consulta de la rama autorizada. Su superior directo administra este usuario.'}</span></div>`,`<button class="btn secondary" data-action="close-dialog">Cerrar</button>${inv&&canManageMember(data,actor(),m)?`<button class="btn secondary" data-action="view-invitation" data-id="${inv.id}">Ver invitación</button>`:''}`);
   }
+}
+function manualUserDialog(){
+  if(actor().role==='collaborator')return;
+  const cs=visibleCampaigns(data,actor()).filter(c=>c.status==='active');
+  showDialog('Alta manual de usuario',`<form id="manual-user-form" class="stack">${field('Nombre completo','manual-name','<input id="manual-name" name="name" required maxlength="80" autocomplete="name">')}${field('Correo o celular con código de país','manual-contact','<input id="manual-contact" name="contact" required placeholder="persona@example.invalid o +525512345678" autocomplete="off">')}${actor().role==='admin'?field('Rol','manual-role','<select id="manual-role" name="role"><option value="coordinator">Coordinador</option><option value="collaborator">Colaborador</option><option value="leader">Líder sin campaña</option></select>'):`<p class="sub">Darás de alta un ${ROLE_NAMES[CHILD_ROLE[actor().role]].toLowerCase()} en tu equipo.</p>`}${field('Campaña','manual-campaign',`<select id="manual-campaign" name="campaignId" required>${cs.map(c=>`<option value="${c.id}">${e(c.name)}</option>`).join('')}</select>`)}${actor().role==='admin'?field('Superior directo','manual-parent',assignmentParentSelect('manual',cs[0]?.id,'coordinator')):''}<div class="notice">${icon('shield',16)}<span>El usuario queda activo en su equipo. ${serverMode?'Al entrar deberá verificar su correo o celular; el servidor de desarrollo muestra el código de prueba.':'Usa datos ficticios: esta vista de prueba guarda cambios solo en tu navegador.'} Los líderes se asignan al crear una campaña.</span></div><div class="form-error" id="manual-error" role="alert"></div></form>`,`<button class="btn secondary" data-action="close-dialog">Cancelar</button><button class="btn" type="submit" form="manual-user-form">Dar de alta</button>`);
+}
+function assignmentParentSelect(prefix,cid,role){
+  return `<select id="${prefix}-parent" name="parentId" required>${data.memberships.filter(m=>m.campaignId===cid&&m.role===(role==='coordinator'?'leader':'coordinator')&&m.status==='active').map(m=>`<option value="${m.id}">${e(memberUser(m).name)}</option>`).join('')}</select>`;
+}
+function moveUserDialog(id){
+  const m=allowedMember(id);if(!m||!canMove(m))return;
+  const destinations=data.memberships.filter(p=>p.role==='coordinator'&&p.status==='active'&&p.id!==m.parentId&&data.memberships.some(l=>l.id===p.parentId&&l.status==='active'));
+  showDialog('Mover colaborador de equipo',`<form id="move-user-form" data-id="${m.id}" class="stack"><div class="row">${personAvatar(memberUser(m),true)}<div><h3>${e(memberUser(m).name)}</h3><p class="sub">${e(campaign(m.campaignId)?.name)} · ${e(memberUser(data.memberships.find(p=>p.id===m.parentId)).name)}</p></div></div>${field('Campaña · líder · coordinador de destino','move-parent',`<select id="move-parent" name="parentId" required><option value="">Selecciona el equipo de destino</option>${destinations.map(p=>`<option value="${p.id}">${e(campaign(p.campaignId).name)} · ${e(memberUser(data.memberships.find(l=>l.id===p.parentId)).name)} · ${e(memberUser(p).name)}</option>`).join('')}</select>`)}<div class="notice">${icon('shield',16)}<span>Las nuevas capturas pertenecerán al equipo de destino. Las evidencias anteriores conservarán su campaña, autor y rama de origen. El estado activo o inactivo se conserva. Finaliza y envía las capturas locales pendientes antes de moverlo.</span></div><div class="form-error" id="move-error" role="alert"></div></form>`,`<button class="btn secondary" data-action="close-dialog">Cancelar</button><button class="btn" type="submit" form="move-user-form">Guardar traslado</button>`);
 }
 function campaignDialog(){
   if(actor().role!=='admin'){toast('Solo el administrador puede crear campañas.');return;}
-  showDialog('Nueva campaña',`<form id="campaign-form" class="stack">${field('Nombre de campaña','campaign-name','<input id="campaign-name" name="name" maxlength="100" placeholder="Ej. Presencia en el centro" required>')}${field('Ubicación','campaign-location','<input id="campaign-location" name="location" maxlength="150" placeholder="Zona, ciudad o referencia" required>')}${field('Líder general · una persona','campaign-leader',`<select id="campaign-leader" name="leaderId" required><option value="">Selecciona un líder</option>${data.users.filter(u=>u.role==='leader').map(u=>`<option value="${u.id}">${e(u.name)}</option>`).join('')}</select>`)}<div><label>Tipos de campaña · selecciona uno o varios</label><div class="type-choice">${Object.entries(TYPE_NAMES).map(([v,n])=>`<label><input type="checkbox" name="types" value="${v}">${n}</label>`).join('')}</div><p class="sub" style="font-size:11px">Dos o más opciones crean una campaña mixta.</p></div><div class="form-error" id="campaign-error"></div></form>`,`<button class="btn secondary" data-action="close-dialog">Cancelar</button><button class="btn" form="campaign-form" type="submit">Crear campaña</button>`);
+  showDialog('Nueva campaña',`<form id="campaign-form" class="stack">${field('Nombre de campaña','campaign-name','<input id="campaign-name" name="name" maxlength="100" placeholder="Ej. Presencia en el centro" required>')}${field('Ubicación','campaign-location','<input id="campaign-location" name="location" maxlength="150" placeholder="Zona, ciudad o referencia" required>')}${field('Líder general · una persona','campaign-leader',`<select id="campaign-leader" name="leaderId" required><option value="">Selecciona un líder</option>${data.users.filter(u=>u.role==='leader'&&u.active!==false).map(u=>`<option value="${u.id}">${e(u.name)}</option>`).join('')}</select>`)}<div><label>Tipos de campaña · selecciona uno o varios</label><div class="type-choice">${Object.entries(TYPE_NAMES).map(([v,n])=>`<label><input type="checkbox" name="types" value="${v}">${n}</label>`).join('')}</div><p class="sub" style="font-size:11px">Dos o más opciones crean una campaña mixta.</p></div><div class="form-error" id="campaign-error"></div></form>`,`<button class="btn secondary" data-action="close-dialog">Cancelar</button><button class="btn" form="campaign-form" type="submit">Crear campaña</button>`);
 }
 function inviteDialog(){
   if(actor().role==='collaborator'){toast('Tu rol no permite invitar usuarios.');return;}
@@ -315,7 +335,7 @@ function invitationResult(inviteId){
 function recordDialog(id,seq=1){
   const r=ownRecords().find(r=>r.id===id);
   if(!r){toast('Este registro está fuera de tu alcance.');return;}
-  const m=data.memberships.find(m=>m.id===r.membershipId),u=user(m?.userId),selected=r.media[seq-1]||r.media[0];
+  const m=data.memberships.find(m=>m.id===r.membershipId),u=r.author||user(m?.userId),selected=r.media[seq-1]||r.media[0];
   const filename=r.number?finalFilename(r.campaignName||campaign(r.campaignId)?.name||'Campaña',r.number,seq,selected.kind==='video'?'mp4':'jpg'):'Nombre final pendiente de sincronización';
   showDialog(`Registro ${r.number?'#'+String(r.number).padStart(3,'0'):'pendiente'}`,`<div class="between"><span>${e(campaign(r.campaignId)?.name)}</span>${typePill(r.type)}</div>${serverMode?`<div class="photo-art">${selected.kind==='photo'?`<img src="/api/records/${r.id}/media/${selected.id}" alt="Evidencia registrada" style="width:100%;height:100%;object-fit:contain">`:`<video controls playsinline src="/api/records/${r.id}/media/${selected.id}" style="width:100%;height:100%"></video>`}</div>`:selected.kind==='photo'?photoArt(seq):`<div class="media-placeholder"><div>${icon('video',42)}<p>Video de ejemplo</p><small>No se ha grabado un archivo real.</small></div></div>`}<div class="detail-media-tabs">${r.media.map((x,i)=>`<button class="${seq===i+1?'active':''}" data-action="record-media" data-id="${r.id}" data-seq="${i+1}">${x.kind==='photo'?'Foto':'Video'} ${i+1}</button>`).join('')}</div>
   <p class="muted" style="font-size:10px;overflow-wrap:anywhere">${e(filename)}</p><div class="details-grid"><div><small>Colaborador</small><strong>${e(r.author?.name||u?.name)}</strong></div><div><small>${selected.kind==='video'?'Inicio de grabación':'Fecha y hora'} ${serverMode?'':'· ejemplo'}</small><strong>${fmtDate(selected.capturedAt||r.capturedAt)}</strong></div><div><small>${serverMode?'GPS al capturar':'GPS de ejemplo'} · precisión ±${r.accuracy} m</small><strong>${gpsLabel(r)}</strong></div><div><small>Dispositivo ${serverMode?'':'· ejemplo'}</small><strong>${e(r.device.brand)} · ${e(r.device.model)}</strong></div><div><small>Identificador de instalación</small><strong style="overflow-wrap:anywhere">${e(r.device.installationId)}</strong></div><div><small>Estado</small>${statusPill(r.status)}</div></div><div><label>Notas</label><p class="sub" style="font-size:12px">${e(r.notes||'Sin notas.')}</p></div><div class="notice">${icon('shield',16)}<span>Registro sellado. Las evidencias originales no pueden modificarse ni eliminarse desde esta vista.</span></div>`,`<button class="btn secondary" data-action="close-dialog">Cerrar</button>`);
@@ -346,10 +366,14 @@ document.addEventListener('click',async event=>{
     case 'new-campaign':campaignDialog();break;
     case 'open-campaign':state.filters={campaign:id,types:[],from:'',to:''};navigate('evidence');break;
     case 'invite-user':inviteDialog();break;
+    case 'new-user':manualUserDialog();break;
+    case 'move-user':moveUserDialog(id);break;
+    case 'deactivate-user':userDialog(id,true);if(document.querySelector('#edit-status option[value="inactive"]:not(:disabled)'))document.querySelector('#edit-status').value='inactive';break;
+    case 'admin-detail':{const records=ownRecords(),media=records.flatMap(r=>r.media);showDialog('Ficha del administrador',`<div class="row">${personAvatar(actor(),true)}<div><h2>${e(actor().name)}</h2><p class="sub">${e(actor().contact)}</p></div></div><div class="team-totals"><div><strong>${records.length}</strong><small>Registros</small></div><div><strong>${media.filter(m=>m.kind==='photo').length}</strong><small>Fotos</small></div><div><strong>${media.filter(m=>m.kind==='video').length}</strong><small>Videos</small></div><div><strong>${new Set(data.memberships.filter(m=>m.status==='active').map(m=>m.userId)).size}</strong><small>Personas activas</small></div></div><p class="sub">Resumen de todas las campañas.</p>`,`<button class="btn" data-action="close-dialog">Cerrar</button>`);break;}
     case 'view-invitation':invitationResult(id);break;
     case 'user-detail':userDialog(id);break;
     case 'edit-user':userDialog(id,true);break;
-    case 'users-layout':state.usersLayout=layout;render();break;
+    case 'expand-teams':case 'collapse-teams':for(const m of scopedMemberships(data,actor()))state.branchOpen[m.id]=action==='expand-teams';render();break;
     case 'record-detail':recordDialog(id);break;
     case 'record-media':recordDialog(id,Number(seq));break;
     case 'clear-filters':state.filters={campaign:'',types:[],from:'',to:''};render();break;
@@ -385,6 +409,7 @@ document.addEventListener('click',async event=>{
     }
   }
 });
+document.addEventListener('toggle',event=>{const el=event.target;if(el.id==='users-table')state.tableOpen=el.open;if(el.dataset?.branch)state.branchOpen[el.dataset.branch]=el.open;},true);
 document.addEventListener('change',event=>{
   const el=event.target;
   if(el.id==='demo-role'){
@@ -404,6 +429,11 @@ document.addEventListener('change',event=>{
       const select=document.querySelector('#invite-campaign'); select.disabled=role==='leader';
       document.querySelector('#invite-parent').outerHTML=role==='leader'?'<select id="invite-parent" disabled><option>Administrador</option></select>':inviteParentSelect(cid,role);
     }
+  }
+  if((el.id==='manual-campaign'||el.id==='manual-role')&&actor().role==='admin'){
+    const cid=document.querySelector('#manual-campaign').value,role=document.querySelector('#manual-role').value;
+    document.querySelector('#manual-campaign').disabled=role==='leader';
+    document.querySelector('#manual-parent').outerHTML=role==='leader'?'<select id="manual-parent" disabled><option>Administrador</option></select>':assignmentParentSelect('manual',cid,role);
   }
 });
 document.addEventListener('input',event=>{
@@ -431,13 +461,15 @@ document.addEventListener('submit',async event=>{
         }
       }
       if(form.id==='campaign-form'){await api.request('/api/campaigns',{method:'POST',body:{name:fd.get('name'),location:fd.get('location'),leaderId:fd.get('leaderId'),types:fd.getAll('types')}});await refreshServer();modal.close();navigate('campaigns');toast('Campaña guardada en el servidor.');}
-      if(form.id==='edit-user-form'){await api.request('/api/memberships/'+form.dataset.id,{method:'PATCH',body:{name:fd.get('name'),status:fd.get('status')}});await refreshServer();modal.close();render();toast('Pertenencia actualizada en el servidor.');}
+      if(form.id==='edit-user-form'){const m=allowedMember(form.dataset.id);await api.request(m.global?'/api/users/'+m.userId:'/api/memberships/'+m.id,{method:'PATCH',body:{name:fd.get('name'),status:fd.get('status')}});await refreshServer();modal.close();render();toast('Usuario actualizado en el servidor.');}
+      if(form.id==='manual-user-form'){await api.request('/api/users',{method:'POST',body:{name:fd.get('name'),contact:fd.get('contact'),role:actor().role==='admin'?fd.get('role'):CHILD_ROLE[actor().role],campaignId:fd.get('campaignId'),parentId:fd.get('parentId')}});await refreshServer();modal.close();render();toast('Usuario dado de alta.');}
+      if(form.id==='move-user-form'){await api.request('/api/memberships/'+form.dataset.id+'/transfer',{method:'POST',body:{parentId:fd.get('parentId')}});await refreshServer();modal.close();render();toast('Colaborador trasladado. Su historial se conserva.');}
       if(form.id==='invite-form'){
         const role=actor().role==='admin'?fd.get('role'):CHILD_ROLE[actor().role];
         const result=await api.request('/api/invitations',{method:'POST',body:{name:fd.get('name'),contact:fd.get('contact'),role,campaignId:fd.get('campaignId'),parentId:fd.get('parentId')}});
         state.inviteLinks[result.id]=result.link;await refreshServer();render();invitationResult(result.id);
       }
-    }catch(error){const id=form.id==='login-form'?'login-error':form.id==='campaign-form'?'campaign-error':form.id==='invite-form'?'invite-error':'edit-error';const el=document.getElementById(id);if(el)el.textContent=error.message;else toast(error.message);}
+    }catch(error){const id=({'login-form':'login-error','campaign-form':'campaign-error','invite-form':'invite-error','manual-user-form':'manual-error','move-user-form':'move-error'})[form.id]||'edit-error';const el=document.getElementById(id);if(el)el.textContent=error.message;else toast(error.message);}
     finally{if(button?.isConnected)button.disabled=false;}
     return;
   }
@@ -454,6 +486,27 @@ document.addEventListener('submit',async event=>{
       audit('Creó campaña',cid);save();modal.close();navigate('campaigns');toast('Campaña creada en la demostración.');
     }catch(err){document.querySelector('#campaign-error').textContent=err.message;}
   }
+  if(form.id==='manual-user-form'){
+    try{
+      const input={role:fd.get('role'),campaignId:fd.get('campaignId'),parentId:fd.get('parentId')},assignment=manualAssignment(data,actor(),input),name=String(fd.get('name')||'').trim();
+      let value=String(fd.get('contact')||'').trim();
+      if(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))value=value.toLowerCase();else value=value.replace(/[ ()-]/g,'');
+      if(!name||name.length>80||value.length>150||!(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)||/^\+[1-9][0-9]{7,14}$/.test(value)))throw Error('Ingresa nombre y un correo o celular con código de país.');
+      if(data.users.some(u=>u.contact===value))throw Error('El contacto ya está registrado. Modifica su ficha o mueve al colaborador.');
+      const uid=ids(),mid=assignment.campaignId?ids():null;
+      data.users.push({id:uid,name,contact:value,role:assignment.role,active:true});
+      if(mid)data.memberships.push({id:mid,userId:uid,...assignment,status:'active'});
+      audit('Alta manual de usuario',mid||uid);save();modal.close();render();toast('Alta guardada en la vista de prueba.');
+    }catch(err){document.querySelector('#manual-error').textContent=err.message;}
+  }
+  if(form.id==='move-user-form'){
+    try{const {source,parent}=transferTarget(data,actor(),form.dataset.id,fd.get('parentId'));
+      if(data.drafts[source.userId]?.media?.length)throw Error('Finaliza y envía primero el borrador del colaborador.');
+      if(data.records.some(r=>r.membershipId===source.id&&r.status==='pending'))throw Error('Envía primero los registros pendientes del colaborador.');
+      const next={...source,id:ids(),parentId:parent.id,campaignId:parent.campaignId};source.status='transferred';data.memberships.push(next);
+      audit('Trasladó colaborador de '+source.id+' a '+next.id,next.id);save();modal.close();render();toast('Traslado guardado. Las evidencias anteriores conservan su equipo.');
+    }catch(err){document.querySelector('#move-error').textContent=err.message;}
+  }
   if(form.id==='edit-user-form'){
     const m=allowedMember(form.dataset.id);
     try{
@@ -463,7 +516,10 @@ document.addEventListener('submit',async event=>{
       if(!['active','inactive','invited'].includes(status))throw Error('Estado inválido.');
       if(status==='inactive'&&data.memberships.some(x=>x.parentId===m.id&&x.status==='active'))throw Error('Resuelve primero el equipo activo de este usuario.');
       if(m.status==='invited'&&status==='active')throw Error('La invitación debe aceptarse en la versión con servidor; no se puede activar desde esta demo.');
-      user(m.userId).name=name;m.status=status;audit('Actualizó usuario',m.id);save();modal.close();render();toast('Cambios guardados en la demo.');
+      if(m.role==='leader'&&!m.global&&status==='inactive')throw Error('La campaña debe conservar su líder activo.');
+      if(status==='active'&&m.parentId&&!data.memberships.some(p=>p.id===m.parentId&&p.status==='active'))throw Error('Reactiva primero al superior directo.');
+      if(m.global){user(m.userId).name=name;user(m.userId).active=status==='active';}else m.displayName=name;
+      if(actor().role==='admin')user(m.userId).name=name;m.status=status;audit('Actualizó usuario',m.id);save();modal.close();render();toast('Cambios guardados en la demo.');
     }catch(err){document.querySelector('#edit-error').textContent=err.message;}
   }
   if(form.id==='invite-form'){
