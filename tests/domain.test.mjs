@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {seedData,scopedMemberships,visibleCampaigns,canManageMember,visibleRecords,filterRecords,validateCampaign,assertCapture,assertEditable,finalFilename,dateInMexico} from '../src/domain.mjs';
+import {seedData,scopedMemberships,visibleCampaigns,canManageMember,visibleRecords,filterRecords,validateCampaign,assertCapture,assertEditable,finalFilename,dateInMexico,dailyEvidence} from '../src/domain.mjs';
 const fixture=()=>{const data=seedData();return {data,actor:id=>data.users.find(u=>u.id===id)};};
 test('leaders see only their campaign branches, including descendants',()=>{
   const {data,actor}=fixture();
@@ -68,4 +68,12 @@ test('filenames preserve numbering and reject invalid media positions',()=>{
   assert.equal(finalFilename('A/B',2,1,'jpg'),'A_B - 2 - 1.jpg');
   assert.throws(()=>finalFilename('Morelia',0,1,'jpg'));
   assert.throws(()=>finalFilename('Morelia',1,14,'jpg'));
+});
+
+test('explicit empty type selection yields zero records, default selection yields all',()=>{
+  const d=seedData();assert.equal(filterRecords(d.records,{types:[]}).length,0);assert.equal(filterRecords(d.records).length,18);
+});
+test('daily evidence counts media on Mexico capture date and includes the latest capture',()=>{
+  const rs=[{capturedAt:'2026-10-07T02:00:00Z',media:[{kind:'photo'},{kind:'photo'},{kind:'video'}]},{capturedAt:'2026-10-07T08:00:00Z',media:[{kind:'photo'}]}];
+  const days=dailyEvidence(rs);assert.equal(days.at(-2).day,'2026-10-06');assert.equal(days.at(-2).photos,2);assert.equal(days.at(-2).videos,1);assert.equal(days.at(-1).photos,1);
 });

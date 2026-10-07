@@ -67,7 +67,7 @@ export function visibleCampaigns(data,actor) {
 }
 export function canManageMember(data,actor,target) {
   if(!target) return false;
-  if(target.status==='transferred') return false;
+  if(['transferred','deleted'].includes(target.status)) return false;
   if(actor.role==='admin') return true;
   if(target.role!==CHILD_ROLE[actor.role]) return false;
   const parent=data.memberships.find(m=>m.id===target.parentId);
@@ -99,9 +99,9 @@ export function transferTarget(data,actor,memberId,parentId) {
   const expected=source.role==='coordinator'?'leader':'coordinator';
   if(!parent||parent.role!==expected||parent.status!=='active'||parent.role==='coordinator'&&!data.memberships.some(m=>m.id===parent.parentId&&m.role==='leader'&&m.status==='active')||!data.campaigns.some(c=>c.id===parent.campaignId&&c.status==='active'))throw Error('Selecciona un '+ROLE_NAMES[expected].toLowerCase()+' activo de destino.');
   if(source.parentId===parent.id)throw Error('La persona ya pertenece a este equipo.');
-  const scope=descendants(data,source.id),branch=data.memberships.filter(m=>scope.has(m.id)&&m.status!=='transferred');
+  const scope=descendants(data,source.id),branch=data.memberships.filter(m=>scope.has(m.id)&&!['transferred','deleted'].includes(m.status));
   if(branch.some(m=>m.status==='invited'))throw Error('Resuelve las invitaciones pendientes del equipo antes de trasladarlo.');
-  if(branch.some(m=>data.memberships.some(x=>!scope.has(x.id)&&x.userId===m.userId&&x.campaignId===parent.campaignId&&x.status!=='transferred')))throw Error('Una persona del equipo ya pertenece a la campaña de destino.');
+  if(branch.some(m=>data.memberships.some(x=>!scope.has(x.id)&&x.userId===m.userId&&x.campaignId===parent.campaignId&&!['transferred','deleted'].includes(x.status))))throw Error('Una persona del equipo ya pertenece a la campaña de destino.');
   return {source,parent,branch};
 }
 export function captureCampaigns(data,actor){
@@ -118,8 +118,8 @@ export function dateInMexico(iso) {
   const get=t=>parts.find(p=>p.type===t).value;
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
-export function filterRecords(records,{campaign='',types=[],from='',to=''}={}) {
-  return records.filter(r=>(!campaign||r.campaignId===campaign)&&(!types.length||types.includes(r.type))&&(!from||dateInMexico(r.capturedAt)>=from)&&(!to||dateInMexico(r.capturedAt)<=to));
+export function filterRecords(records,{campaign='',types=null,from='',to=''}={}) {
+  return records.filter(r=>(!campaign||r.campaignId===campaign)&&(types===null||types.includes(r.type))&&(!from||dateInMexico(r.capturedAt)>=from)&&(!to||dateInMexico(r.capturedAt)<=to));
 }
 export function validateCampaign(actor,input,data) {
   if(actor.role!=='admin') throw Error('Solo el administrador puede crear campañas.');
@@ -146,4 +146,15 @@ export function finalFilename(campaignName,number,seq,extension) {
   if(!/^(jpg|jpeg|png|mp4|webm)$/i.test(extension)) throw Error('Formato inválido.');
   const safe=campaignName.trim().replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_');
   return `${safe} - ${number} - ${seq}.${extension.toLowerCase()}`;
+}
+
+export function assertDeletable(data,actor,m) {
+  if(!m||m.status==='deleted'||m.status==='transferred'||!(m.global?actor.role==='admin':canManageMember(data,actor,m)))throw Error('No tienes permiso para eliminar este usuario.');
+  if(m.role==='leader'&&!m.global)throw Error('La campaña debe conservar su líder. No puede eliminarse mientras esté asignado.');
+  if(data.memberships.some(x=>x.parentId===m.id&&!['deleted','transferred'].includes(x.status)))throw Error('Mueve o elimina primero las personas a su cargo, incluidas las inactivas.');
+  return m;
+}
+export function dailyEvidence(records,days=4) {
+  const last=records.length?records.map(r=>dateInMexico(r.capturedAt)).sort().at(-1):dateInMexico(new Date().toISOString());
+  return Array.from({length:days},(_,i)=>{const date=new Date(last+'T12:00:00Z');date.setUTCDate(date.getUTCDate()+i-days+1);const day=date.toISOString().slice(0,10),media=records.filter(r=>dateInMexico(r.capturedAt)===day).flatMap(r=>r.media);return {day,photos:media.filter(m=>m.kind==='photo').length,videos:media.filter(m=>m.kind==='video').length};});
 }

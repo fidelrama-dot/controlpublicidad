@@ -55,6 +55,8 @@ export function createHttpServer(service,{origin='http://127.0.0.1:4173'}={}){
       if(path==='/api/campaigns'&&method==='POST'){send(response,201,service.createCampaign(actor,await body(request,4096)));return;}
       if(path==='/api/users'&&method==='POST'){send(response,201,service.createUser(actor,await body(request,4096)));return;}
       let match;
+      if((match=path.match(/^\/api\/users\/([^/]+)$/))&&method==='DELETE'){send(response,200,service.deleteGlobalUser(actor,match[1]));return;}
+      if((match=path.match(/^\/api\/memberships\/([^/]+)$/))&&method==='DELETE'){send(response,200,service.deleteMember(actor,match[1]));return;}
       if((match=path.match(/^\/api\/users\/([^/]+)$/))&&method==='PATCH'){send(response,200,service.updateGlobalUser(actor,match[1],await body(request,4096)));return;}
       if((match=path.match(/^\/api\/memberships\/([^/]+)\/transfer$/))&&method==='POST'){send(response,200,service.transferMember(actor,match[1],await body(request,4096)));return;}
       if((match=path.match(/^\/api\/memberships\/([^/]+)$/))&&method==='PATCH'){send(response,200,service.updateMember(actor,match[1],await body(request,4096)));return;}

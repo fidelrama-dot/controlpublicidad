@@ -4,11 +4,12 @@ import {readFile} from 'node:fs/promises';
 import {JSDOM,VirtualConsole} from 'jsdom';
 import {seedData} from '../src/domain.mjs';
 const html=(await readFile(new URL('../index.html',import.meta.url),'utf8')).replace('<script type="module">','<script>');
-function createApp(saved){
+function createApp(saved,fetcher){
   const errors=[],console=new VirtualConsole();
   console.on('jsdomError',e=>{if(!e.message.includes('Not implemented: navigation'))errors.push(e.message);});
-  const dom=new JSDOM(html,{url:'https://controlpublicidad.example.invalid/',runScripts:'dangerously',virtualConsole:console,beforeParse(w){
+  const dom=new JSDOM(fetcher?html.replace('</head>','<meta name="controlpublicidad-cloud" content="1"></head>'):html,{url:'https://controlpublicidad.example.invalid/',runScripts:'dangerously',virtualConsole:console,beforeParse(w){
     w.structuredClone=structuredClone;
+    if(fetcher)w.fetch=fetcher;
     w.scrollTo=()=>{};
     w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
     w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
@@ -69,7 +70,7 @@ test('campaign form, evidence filters, map and media details remain connected',(
   assert.equal(a.document.querySelectorAll('.pin').length,0);
   assert.deepEqual(a.errors,[]);a.close();
 });
-test('capture enforces limits, restores draft, seals and simulates one-time sync',()=>{
+test('capture enforces limits, restores draft, seals and retains the queue when no cloud is connected',()=>{
   let a=createApp();a.login();a.change('#demo-role','f1');
   assert.equal(a.document.querySelectorAll('.sidebar .nav-link').length,2);
   assert.equal(a.document.querySelectorAll('[data-nav="users"]').length,0);
@@ -89,7 +90,8 @@ test('capture enforces limits, restores draft, seals and simulates one-time sync
   a.click('[data-nav="sync"]');
   assert.equal(a.document.querySelectorAll('.sync-row .pill.amber').length,1);
   a.click('[data-action="sync"]');
-  assert.ok(a.q('[data-action="sync"]').disabled);
+  assert.ok(!a.q('[data-action="sync"]').disabled);
+  assert.equal(a.document.querySelectorAll('.sync-row .pill.amber').length,1);
   a.click('.sync-row [data-action="record-detail"]');
   assert.equal(a.document.querySelectorAll('.detail-media-tabs button').length,13);
   a.click('[data-action="record-media"][data-seq="11"]');
@@ -205,4 +207,64 @@ test('profile controls enforce consultation scope and prevent disabling a coordi
   a.click('[data-action="close-dialog"]');a.change('#demo-role','l1');a.click('[data-nav="users"]');a.click('.tree [data-action="user-detail"][data-id="m4"]');
   assert.equal(a.document.querySelector('#modal [data-action="edit-profile-name"]'),null);assert.equal(a.document.querySelector('#modal [data-action="toggle-user-status"]'),null);
   assert.deepEqual(a.errors,[]);a.close();
+});
+
+test('breadcrumb and brand navigate to home, and daily bars expose exact photo/video counts',()=>{
+  const a=createApp();a.login();
+  assert.equal(a.q('.breadcrumb a[aria-current]').textContent,'Resumen');
+  assert.equal(a.document.querySelectorAll('.chart-axis span').length,5);
+  const first=a.q('.chart-bar');a.click('.chart-bar');assert.equal(a.q('.chart-readout').textContent,first.dataset.label);
+  assert.equal(first.getAttribute('aria-pressed'),'true');
+  a.click('[data-nav="users"]');a.click('.breadcrumb [data-nav="home"]');assert.match(a.q('h1').textContent,/Todo en su lugar/);
+  a.click('[data-nav="users"]');a.click('.brand');assert.match(a.q('h1').textContent,/Todo en su lugar/);
+  a.change('#demo-role','f1');a.click('[data-nav="sync"]');
+  assert.ok(a.q('.daily-chart').compareDocumentPosition(a.q('.sync-row'))&a.dom.window.Node.DOCUMENT_POSITION_FOLLOWING);
+  const bars=[...a.document.querySelectorAll('.chart-bar')];assert.equal(bars.reduce((n,b)=>n+Number(b.dataset.count),0),12);
+  a.click('.brand');assert.match(a.q('h1').textContent,/Nuevo registro/);
+  assert.deepEqual(a.errors,[]);a.close();
+});
+test('evidence types start checked, empty selection shows none, campaign change selects allowed types',()=>{
+  const a=createApp();a.login();a.click('[data-nav="evidence"]');
+  assert.equal(a.document.querySelectorAll('[name="filter-type"]:checked').length,3);
+  for(const value of ['lona','espectacular','barda']){const box=a.q('[name="filter-type"][value="'+value+'"]');box.checked=false;box.dispatchEvent(new a.dom.window.Event('change',{bubbles:true}));}
+  assert.equal(a.document.querySelectorAll('.evidence-card').length,0);
+  a.change('#filter-campaign','p2');assert.equal(a.document.querySelectorAll('[name="filter-type"]:checked').length,1);assert.equal(a.q('[name="filter-type"]').value,'espectacular');
+  a.click('[data-action="clear-filters"]');assert.equal(a.document.querySelectorAll('.evidence-card').length,18);
+  assert.deepEqual(a.errors,[]);a.close();
+});
+test('coordinator deletion confirms, retains original evidence and blocks future editing and capture',async()=>{
+  const a=createApp();a.login();a.change('#demo-role','c1');a.click('[data-nav="users"]');
+  assert.ok(a.q('.tree [data-id="m2"] .avatar').classList.contains('role-coordinator'));
+  assert.ok(a.q('.tree [data-id="m4"] .avatar').classList.contains('role-collaborator'));
+  a.click('.tree [data-id="m4"]');a.click('[data-action="toggle-user-status"]');await new Promise(r=>setTimeout(r,0));
+  assert.ok(a.q('.tree [data-id="m4"] .avatar').classList.contains('is-inactive'));
+  a.click('[data-action="delete-user"]');assert.ok(a.q('[data-action="confirm-delete-user"]'));a.click('[data-action="user-detail"][data-id="m4"]');
+  a.click('[data-action="delete-user"]');a.click('[data-action="confirm-delete-user"]');await new Promise(r=>setTimeout(r,0));
+  const d=JSON.parse(a.dom.window.localStorage.getItem('controlpublicidad-screens-v1')).data;
+  assert.equal(d.memberships.find(m=>m.id==='m4').status,'deleted');assert.equal(d.records.length,18);
+  a.change('#user-status','deleted');a.click('.tree [data-id="m4"]');assert.equal(a.document.querySelector('[data-action="toggle-user-status"]'),null);a.click('[data-action="close-dialog"]');
+  a.click('[data-nav="evidence"]');assert.match(a.q('#page').textContent,/Sofía LópezDado de baja/);
+  a.click('[data-action="record-detail"][data-id="r1"]');assert.match(a.q('#modal').textContent,/Dado de baja/);a.click('[data-action="close-dialog"]');
+  a.change('#demo-role','f1');assert.equal(a.document.querySelector('[data-action="seal-record"]'),null);
+  assert.deepEqual(a.errors,[]);a.close();
+});
+const tick=()=>new Promise(r=>setTimeout(r,20));
+test('seal tries cloud automatically, lost confirmation stays queued, retry preserves ID and restores receipt',async()=>{
+  const receipts=new Map();let postCalls=0,loseReply=true;
+  const fetcher=async(path,options)=>{
+    if(options.method==='GET')return new Response(JSON.stringify({records:[...receipts.values()]}),{status:200});
+    postCalls++;const p=JSON.parse(options.body);let result=receipts.get(p.record.id);
+    if(!result){result={record:p.record,context:p.context,receipt:{id:p.record.id,number:19,receivedAt:'2026-10-07T12:00:00Z',kind:'demo-metadata'}};receipts.set(p.record.id,result);}
+    if(loseReply){loseReply=false;throw new TypeError('connection lost');}
+    return new Response(JSON.stringify(result),{status:201});
+  };
+  let a=createApp(null,fetcher);await tick();a.login();a.change('#demo-role','f1');
+  a.change('[name="capture-type"][value="lona"]','lona');a.click('[data-action="add-media"][data-kind="photo"]');a.click('[data-action="seal-record"]');await tick();
+  assert.equal(postCalls,1);a.click('[data-nav="sync"]');assert.equal(a.document.querySelectorAll('.sync-row .pill.amber').length,1);
+  a.click('[data-action="sync"]');await tick();assert.equal(postCalls,2);assert.equal(receipts.size,1);assert.ok(a.q('[data-action="sync"]').disabled);
+  assert.match(a.q('.sync-row').textContent,/En nube/);const stored=JSON.parse(a.dom.window.localStorage.getItem('controlpublicidad-screens-v1')).data;
+  const r=stored.records.find(r=>r.cloudReceipt);assert.equal(r.number,19);assert.equal(r.media.length,1);
+  assert.deepEqual(a.errors,[]);a.close();
+  a=createApp(null,fetcher);await tick();a.login();a.change('#demo-role','f1');a.click('[data-nav="sync"]');
+  assert.match(a.q('#page').textContent,/En nube/);assert.equal(a.document.querySelectorAll('.sync-row').length,6);assert.deepEqual(a.errors,[]);a.close();
 });

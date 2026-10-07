@@ -41,7 +41,7 @@ El enlace del servidor local aún no es accesible desde teléfonos de otras pers
 
 `POST /api/users`: `name`, `contact`, `role`, `campaignId`, `parentId`. El administrador puede crear un líder sin campaña; líderes y coordinadores solo crean su rol inferior en su propia rama. Contactos duplicados se rechazan; se normalizan correos y celulares E.164. El alta queda activa y auditada, sin invitación ni verificación ficticia de identidad: el usuario verifica su contacto al iniciar sesión.
 
-`PATCH /api/memberships/:id`: nombre visible y estado activo/inactivo. La baja es por campaña, no borra evidencias. No se desactiva el líder de campaña ni un superior con personas activas. Las asignaciones históricas trasladadas no se reactivan ni editan.
+`PATCH /api/memberships/:id`: nombre visible y estado activo/inactivo. La baja es por campaña, no borra evidencias. No se desactiva el líder de campaña ni un superior con personas activas. Las asignaciones históricas trasladadas o eliminadas no se reactivan ni editan.
 
 `POST /api/memberships/:id/transfer` con `{"parentId":"ID del coordinador de destino"}`. Solo el administrador traslada coordinadores o colaboradores activos/inactivos. Para colaboradores, el destino es un coordinador activo bajo un líder activo; para coordinadores, es el líder activo de la campaña de destino. Al trasladar un coordinador también se trasladan sus colaboradores actuales, en una misma transacción. Las invitaciones pendientes del equipo, el mismo superior o una persona ya asignada a la campaña de destino bloquean toda la operación.
 
@@ -108,3 +108,11 @@ La recepción verifica el contenido una vez descifrado; archivos y fragmentos al
 401: acceso o código inválido. 403/404: recurso fuera de alcance. 409: conflicto, contenido alterado o registro incompleto. 413: cuerpo demasiado grande. 429: demasiados intentos.
 Los errores de almacenamiento conservan el registro pendiente; la app debe conservar también su copia cifrada.
 La recuperación administrativa de pendientes tras desactivar un usuario y los traslados entre ramas siguen pendientes.
+
+## Baja definitiva
+`DELETE /api/memberships/:id` conserva la pertenencia con estado `deleted`, su autor y sus registros. Respeta la administración directa en cascada; se rechaza mientras tenga personas activas, inactivas o invitadas a su cargo. No elimina al líder asignado de una campaña. Revoca sus invitaciones pendientes. La evidencia íntegra continúa visible a la rama original y al administrador; esa pertenencia deja de admitir nuevas capturas.
+
+`DELETE /api/users/:id` permite al administrador dar de baja un líder sin ninguna campaña; conserva su cuenta, marca `deleted`, desactiva acceso y revoca sesiones/invitaciones. Estas rutas no eliminan archivos ni registros.
+
+## API separada de la vista privada de prueba
+`GET/POST /api/preview/records` y `POST /api/preview/deletions` son rutas del Worker privado, no de la API móvil. Guardan exclusivamente metadatos ficticios y marcas de baja en D1. Usan la identidad del propietario de Sites y validan el origen de las escrituras. UUID y contenido inmutable hacen los reintentos idempotentes; la respuesta asigna número y fecha de recepción. No aceptan bytes de archivos ni sustituyen la verificación por fragmentos del servidor local. Los personajes del selector son demostración; no son usuarios autenticados de producción.

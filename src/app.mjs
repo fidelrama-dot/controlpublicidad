@@ -1,28 +1,31 @@
-import { TYPE_NAMES, ROLE_NAMES, CHILD_ROLE, seedData, scopedMemberships, visibleCampaigns, canManageMember, visibleRecords, filterRecords, validateCampaign, assertCapture, assertEditable, finalFilename, dateInMexico, descendants, teamSummary, manualAssignment, transferTarget, captureCampaigns } from './domain.mjs';
-import { ApiClient } from './api.mjs';
+import { TYPE_NAMES, ROLE_NAMES, CHILD_ROLE, seedData, scopedMemberships, visibleCampaigns, canManageMember, visibleRecords, filterRecords, validateCampaign, assertCapture, assertEditable, finalFilename, dateInMexico, descendants, teamSummary, manualAssignment, transferTarget, captureCampaigns, assertDeletable, dailyEvidence } from './domain.mjs';
+import { ApiClient, PreviewCloudClient } from './api.mjs';
 
 const app=document.querySelector('#app');
 const modal=document.querySelector('#modal');
 const STORAGE_KEY='controlpublicidad-screens-v1';
 const serverMode=/^https?:$/.test(location.protocol)&&new URLSearchParams(location.search).get('server')==='1';
 const api=serverMode?new ApiClient():null;
+const cloud=!serverMode&&document.querySelector('meta[name="controlpublicidad-cloud"]')&&typeof globalThis.fetch==='function'?new PreviewCloudClient():null;
 let data=serverMode?{users:[],campaigns:[],memberships:[],records:[],invitations:[],audit:[],drafts:{}}:seedData();
 if(!serverMode)try { const saved=JSON.parse(localStorage.getItem(STORAGE_KEY)); if(saved?.version===1) data=saved.data; } catch {}
 data.drafts ||= {};
-const state={logged:false,actorId:'a1',view:'dashboard',loginMode:'email',loginStep:1,loginContact:'',developmentCode:'',inviteLinks:{},usersSearch:'',userCampaign:'',userRole:'',userStatus:'',tableOpen:false,branchOpen:{},filters:{campaign:'',types:[],from:'',to:''},successId:null};
+data.deletions ||= [];
+const state={logged:false,actorId:'a1',view:'dashboard',loginMode:'email',loginStep:1,loginContact:'',developmentCode:'',inviteLinks:{},usersSearch:'',userCampaign:'',userRole:'',userStatus:'',tableOpen:false,branchOpen:{},filters:{campaign:'',types:Object.keys(TYPE_NAMES),from:'',to:''},successId:null,cloudState:cloud?'connecting':'unavailable',cloudBusy:false};
 const pages={dashboard:'Resumen',campaigns:'Campañas',users:'Usuarios y equipos',evidence:'Evidencias',map:'Mapa de evidencias',capture:'Nuevo registro',sync:'Mis envíos'};
 const ids=()=>globalThis.crypto?.randomUUID?.()||'demo-'+Date.now()+'-'+Math.random().toString(36).slice(2);
 const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const actor=()=>data.users.find(u=>u.id===state.actorId);
 const user=id=>data.users.find(u=>u.id===id);
-const memberUser=m=>({...user(m.userId),name:m.displayName||user(m.userId)?.name});
-const canEdit=m=>m.status!=='invited'&&m.status!=='transferred'&&(m.global?actor().role==='admin':canManageMember(data,actor(),m));
+const memberUser=m=>({...user(m.userId),name:m.displayName||user(m.userId)?.name,role:m.role,status:m.status});
+const canEdit=m=>!['invited','transferred','deleted'].includes(m.status)&&(m.global?actor().role==='admin':canManageMember(data,actor(),m));
 const canMove=m=>actor().role==='admin'&&['coordinator','collaborator'].includes(m.role)&&['active','inactive'].includes(m.status);
 const campaign=id=>data.campaigns.find(c=>c.id===id);
 const initials=name=>name.split(/\s+/).slice(0,2).map(x=>x[0]).join('');
-const personAvatar=(u,large=false)=>`<span class="avatar ${large?'large':''}">${e(initials(u?.name||'Equipo'))}</span>`;
+const personAvatar=(u,large=false)=>`<span class="avatar role-${u?.role||'admin'} ${['inactive','deleted'].includes(u?.status)||u?.active===false?'is-inactive':''} ${large?'large':''}">${e(initials(u?.name||'Equipo'))}</span>`;
 const rolePill=role=>`<span class="pill ${role==='leader'?'purple':role==='collaborator'?'green':''}">${ROLE_NAMES[role]}</span>`;
-const statusPill=status=>`<span class="pill ${status==='active'||status==='synced'?'green':status==='pending'||status==='invited'?'amber':''}"><i class="dot"></i>${{active:'Activo',inactive:'Inactivo',transferred:'Trasladado · historial',invited:'Invitación pendiente',pending:'Pendiente · demo',synced:serverMode?'Confirmado':'Sincronizado · demo',draft:'Borrador · demo'}[status]||e(status)}</span>`;
+const statusPill=status=>`<span class="pill ${status==='active'||status==='synced'?'green':status==='pending'||status==='invited'?'amber':''}"><i class="dot"></i>${{active:'Activo',inactive:'Inactivo',deleted:'Dado de baja',transferred:'Trasladado · historial',invited:'Invitación pendiente',pending:'Pendiente · demo',synced:serverMode?'Confirmado':'Sellado · ejemplo',draft:'Borrador · demo'}[status]||e(status)}</span>`;
+const recordStatus=r=>r.cloudReceipt?'<span class="pill green"><i class="dot"></i>En nube · registro de prueba</span>':statusPill(r.status);
 const typePill=t=>`<span class="pill">${TYPE_NAMES[t]}</span>`;
 const fmtDate=(iso,short=false)=>new Intl.DateTimeFormat('es-MX',{timeZone:'America/Mexico_City',day:'2-digit',month:'short',...(short?{}:{hour:'2-digit',minute:'2-digit'})}).format(new Date(iso));
 const save=()=>{if(serverMode)return true;try{localStorage.setItem(STORAGE_KEY,JSON.stringify({version:1,data}));return true;}catch{toast('No se pudo guardar la demo en este navegador. Mantén esta ventana abierta.');return false;}};
@@ -36,6 +39,60 @@ async function bootServer(){
     if(new URLSearchParams(location.search).get('invite'))showDialog('Aceptar invitación',`<p>Estás conectado como <strong>${e(session.user.name)}</strong> (${e(session.user.contact)}).</p><p class="sub">La invitación solo podrá aceptarse si pertenece a este contacto verificado.</p>`,`<button class="btn secondary" data-action="close-dialog">Cerrar</button><button class="btn" data-action="accept-invite">Aceptar invitación</button>`);
   }
   catch(error){if(error.status!==401)toast(error.message);}
+}
+function cloudPayload(r){
+  const chain=[];let m=data.memberships.find(x=>x.id===r.membershipId);const seen=new Set();
+  while(m&&!seen.has(m.id)){seen.add(m.id);chain.push({...m,status:'active'});m=data.memberships.find(x=>x.id===m.parentId);}
+  const fields=['id','source','author','campaignName','campaignId','membershipId','type','capturedAt','lat','lng','accuracy','notes','media','device'];
+  const record=Object.fromEntries(fields.map(k=>[k,structuredClone(r[k])]));
+  record.source='demo';record.author ||= {id:chain[0]?.userId,name:memberUser(chain[0]).name};record.campaignName ||= campaign(r.campaignId)?.name;
+  return {record,context:{memberships:chain,users:chain.map(m=>({...user(m.userId)})),campaigns:[{...campaign(r.campaignId)}]},baseline:Math.max(0,...data.records.filter(x=>x.campaignId===r.campaignId).map(x=>x.number||0))};
+}
+function confirmCloud(r,receipt){if(receipt?.id!==r.id||receipt.kind!=='demo-metadata'||!Number.isSafeInteger(receipt.number)||receipt.number<1)throw Error('La nube no confirmó el registro. Se conserva pendiente.');r.number=receipt.number;r.status='synced';r.cloudReceipt=receipt;delete r.cloudError;}
+async function bootCloud(){
+  try{
+    const result=await cloud.list();
+    for(const item of result.records){
+      const existing=data.records.find(r=>r.id===item.record.id);
+      if(existing){confirmCloud(existing,item.receipt);continue;}
+      // Only restore missing historical references; existing assignments remain unchanged.
+      for(const u of item.context.users)if(!user(u.id))data.users.push(u);
+      for(const c of item.context.campaigns)if(!campaign(c.id))data.campaigns.push(c);
+      for(const m of item.context.memberships)if(!data.memberships.some(x=>x.id===m.id))data.memberships.push({...m,status:'transferred'});
+      const r={...item.record};confirmCloud(r,item.receipt);data.records.push(r);
+    }
+    for(const mark of result.deletions||[]){
+      const existing=data.deletions.find(d=>d.id===mark.id);if(existing)existing.confirmed=true;else data.deletions.push({...mark,global:!!mark.global,source:'demo',confirmed:true});
+      if(mark.global){const u=user(mark.userId);if(u){u.deleted=true;u.active=false;}}else{const m=data.memberships.find(m=>m.id===mark.id);if(m)m.status='deleted';}
+    }
+    state.cloudState='ready';save();if(state.logged)render();await syncDeletions();await syncCloud();
+  }catch(error){state.cloudState='unavailable';if(state.logged)render();toast(error.message);}
+}
+let deletionBusy=false;
+async function syncDeletions(){
+  if(!cloud||deletionBusy)return;
+  deletionBusy=true;
+  try{for(const mark of data.deletions.filter(d=>!d.confirmed)){const result=await cloud.deletion(mark);if(result.id!==mark.id||result.kind!=='demo-deletion')throw Error('La nube no confirmó la baja.');mark.confirmed=true;save();}}
+  catch(error){state.cloudState='unavailable';toast('Baja conservada en este dispositivo. Se confirmará al recuperar conexión con la nube.');}
+  finally{deletionBusy=false;}
+}
+async function syncCloud(manual=false){
+  if(!cloud){if(manual)toast('La nube no está conectada a esta copia. Los registros siguen pendientes.');return;}
+  if(state.cloudBusy)return;
+  await syncDeletions();
+  if(state.cloudBusy)return;
+  const records=state.logged?ownRecords().filter(r=>r.status==='pending'):[];
+  if(!records.length)return;
+  if(!cloud){if(manual)toast('La nube no está conectada a esta copia. Los registros siguen pendientes.');return;}
+  state.cloudBusy=true;render();let count=0;
+  try{
+    for(const r of records){
+      try{r.cloudPayload ||= cloudPayload(r);save();const result=await cloud.save(r.cloudPayload);confirmCloud(r,result.receipt);state.cloudState='ready';save();count++;}
+      catch(error){r.cloudError=error.message;state.cloudState='unavailable';save();break;}
+    }
+  }finally{state.cloudBusy=false;if(state.logged)render();}
+  if(count===records.length&&state.logged&&ownRecords().some(r=>r.status==='pending'))void syncCloud();
+  if(manual)toast(count===records.length?`${count} registros de prueba confirmados en la nube.`:'Los registros sin confirmar permanecen pendientes. Puedes volver a intentar.');
 }
 const gpsLabel=r=>Number.isFinite(r.lat)&&Number.isFinite(r.lng)?`${r.lat.toFixed(5)}, ${r.lng.toFixed(5)} · ±${r.accuracy} m`:'GPS no disponible';
 function evidenceArt(r,index=0){
@@ -66,10 +123,11 @@ const paths={
   chart:'M4 20h17 M7 15v-5 M12 15V5 M17 15V8',
   layers:'M12 3l10 5-10 5L2 8z M2 12l10 5 10-5 M2 16l10 5 10-5',
   link:'M10 14l4-4 M8 16l-2 2a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0 M16 8l2-2a4 4 0 0 1 6 6l-5 5a4 4 0 0 1-6 0',
+  trash:'M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7',
   info:'M12 11v6 M12 7h.01 M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0'
 };
 function icon(name,size=19){return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]||paths.grid}"/></svg>`;}
-const brand=()=>`<div class="brand"><div class="brand-mark">${icon('pin',23)}</div><div><strong>ControlPublicidad</strong><small>EVIDENCIAS EN CAMPO</small></div></div>`;
+const brand=()=>`<a class="brand" href="#inicio" data-nav="home" aria-label="Ir al inicio"><div class="brand-mark">${icon('pin',23)}</div><div><strong>ControlPublicidad</strong><small>EVIDENCIAS EN CAMPO</small></div></a>`;
 function mapArt(){return `<svg viewBox="0 0 640 460" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
 <rect width="640" height="460" fill="#edf0e3"/><g fill="#e1e8d5"><rect x="34" y="28" width="92" height="56" rx="5"/><rect x="151" y="25" width="61" height="58" rx="4"/><rect x="238" y="20" width="93" height="62" rx="4"/><rect x="354" y="24" width="116" height="60" rx="4"/><rect x="498" y="28" width="90" height="56" rx="4"/><rect x="24" y="116" width="110" height="75" rx="5"/><rect x="164" y="120" width="125" height="70" rx="4"/><rect x="320" y="119" width="71" height="74" rx="5"/><rect x="427" y="122" width="85" height="76" rx="5"/><rect x="24" y="232" width="111" height="77" rx="5"/><rect x="175" y="233" width="107" height="79" rx="4"/><rect x="320" y="232" width="79" height="80" rx="4"/><rect x="426" y="233" width="91" height="72" rx="5"/><rect x="542" y="236" width="88" height="66" rx="4"/><rect x="20" y="350" width="130" height="89" rx="5"/><rect x="179" y="352" width="103" height="89" rx="4"/><rect x="329" y="352" width="72" height="86" rx="4"/><rect x="430" y="350" width="82" height="84" rx="5"/><rect x="543" y="350" width="75" height="84" rx="5"/></g>
 <g fill="none" stroke="#fffdf6" stroke-width="18"><path d="M0 101H640 M0 212H640 M0 330H640 M145 0v460 M303 0v460 M414 0v460 M530 0v460"/><path d="M-30 442L680 8" stroke-width="24"/></g>
@@ -94,6 +152,7 @@ function filtered(){return filterRecords(ownRecords(),state.filters);}
 function campaignOptions(selected=''){return visibleCampaigns(data,actor()).map(c=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${e(c.name)}</option>`).join('');}
 function navigate(view){
   const collaborator=actor().role==='collaborator';
+  if(view==='home')view=collaborator?'capture':'dashboard';
   if(collaborator&&!['capture','sync'].includes(view)) view='capture';
   if(!collaborator&&['capture','sync'].includes(view)) view='dashboard';
   state.view=view;state.successId=null;render();window.scrollTo({top:0,behavior:'instant'});
@@ -108,8 +167,8 @@ function render(){
     <nav class="nav" aria-label="Navegación principal">${nav.map(([v,ic])=>`<button class="nav-link ${state.view===v?'active':''}" data-nav="${v}" ${state.view===v?'aria-current="page"':''}>${icon(ic)}<span>${pages[v]}</span>${v==='sync'&&pending?`<b class="count">${pending}</b>`:''}</button>`).join('')}</nav>
     <div class="side-bottom"><div class="scope-note">${icon('shield',21)}<strong>Tu equipo, tu alcance</strong><br>${coll?'Captura tus registros y consulta el estado de tus envíos.':u.role==='admin'?'Administra las campañas y supervisa todos los equipos.':'Consulta únicamente las campañas y personas de tu equipo.'}</div>
     <div class="side-person">${personAvatar(u)}<div><strong>${e(u.name)}</strong><small>${ROLE_NAMES[u.role]}</small></div><button class="icon-btn" data-action="logout" title="Salir de la demostración" aria-label="Salir de la demostración">${icon('logout',16)}</button></div></div></aside>
-    <main class="main"><header class="topbar"><div class="breadcrumb"><span>ControlPublicidad</span>${icon('chevron',11)}<strong>${pages[state.view]}</strong></div><div class="top-actions"><span class="pill green connection">${icon('wifi',13)} ${serverMode?'Servidor local':'Demo local'}</span>${serverMode?`<span class="pill">${ROLE_NAMES[u.role]}</span>`:`<label class="sr-only" for="demo-role" style="position:absolute;width:1px;height:1px;overflow:hidden">Cambiar usuario de demostración</label><select id="demo-role" class="role-select" aria-label="Cambiar usuario de demostración">${topOptions}</select>`}<button class="icon-btn" data-action="logout" title="Salir" aria-label="Salir">${icon('logout',16)}</button></div></header>
-    <div class="demo-strip">${serverMode?'SERVIDOR LOCAL · Cambios persistentes · Códigos de desarrollo · Cámara y nube pendientes':'PROTOTIPO NAVEGABLE · Datos ficticios · Acceso, GPS y envíos simulados · No uses evidencias reales'}</div>
+    <main class="main"><header class="topbar"><div class="breadcrumb"><a href="#inicio" data-nav="home">ControlPublicidad</a>${icon('chevron',11)}<a href="#${state.view}" data-nav="${state.view}" aria-current="page">${pages[state.view]}</a></div><div class="top-actions"><span class="pill green connection">${icon('wifi',13)} ${serverMode?'Servidor local':state.cloudState==='ready'?'Nube de prueba':state.cloudState==='connecting'?'Conectando':'Sin conexión a nube'}</span>${serverMode?`<span class="pill">${ROLE_NAMES[u.role]}</span>`:`<label class="sr-only" for="demo-role" style="position:absolute;width:1px;height:1px;overflow:hidden">Cambiar usuario de demostración</label><select id="demo-role" class="role-select" aria-label="Cambiar usuario de demostración">${topOptions}</select>`}<button class="icon-btn" data-action="logout" title="Salir" aria-label="Salir">${icon('logout',16)}</button></div></header>
+    <div class="demo-strip">${serverMode?'SERVIDOR LOCAL · Cambios persistentes · Códigos de desarrollo · Cámara y nube pendientes':'PROTOTIPO NAVEGABLE · Usuarios, imágenes y GPS de ejemplo · Nube: solo registros de prueba · No uses evidencias reales'}</div>
     <div class="content" id="page">${renderPage()}</div></main>
     <nav class="mobile-nav" aria-label="Navegación móvil">${nav.map(([v,ic])=>`<button data-nav="${v}" class="${state.view===v?'active':''}" ${state.view===v?'aria-current="page"':''}>${icon(ic)}<span>${v==='evidence'?'Evidencias':v==='users'?'Usuarios':v==='dashboard'?'Inicio':v==='map'?'Mapa':v==='capture'?'Capturar':pages[v]}</span></button>`).join('')}</nav></div>`;
 }
@@ -133,26 +192,38 @@ function renderServerLogin(){
     `${field('Código de verificación','login-code','<input id="login-code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code">')}${state.developmentCode?`<p class="sub" style="font-size:12px">Código de desarrollo: <strong>${e(state.developmentCode)}</strong></p>`:''}<button class="btn" type="submit">${new URLSearchParams(location.search).get('invite')?'Verificar y aceptar invitación':'Entrar'} ${icon('arrow',16)}</button><button class="btn ghost" type="button" data-action="login-back">Cambiar contacto</button>`}<div id="login-error" class="form-error" role="alert"></div></form><div class="notice amber">${icon('info',17)}<span>Servidor local de desarrollo. Los cambios se guardan en la base de datos. No se envían SMS ni correos; no es una conexión a la nube.</span></div><div class="login-bottom">Usuarios de prueba: admin@example.invalid · mariana@example.invalid · diego@example.invalid · sofia@example.invalid</div></section></div>`;
 }
 function renderPage(){return ({dashboard:dashboardPage,campaigns:campaignsPage,users:usersPage,evidence:evidencePage,map:mapPage,capture:capturePage,sync:syncPage}[state.view]||dashboardPage)();}
+function dailyChart(records){
+  const days=dailyEvidence(records),peak=Math.max(1,...days.flatMap(d=>[d.photos,d.videos])),step=Math.max(1,Math.ceil(peak/4)),max=step*4;
+  return `<section class="card daily-chart"><div class="section-heading"><div><h2>Evidencias por día</h2><p>Últimos 4 días con referencia a la captura más reciente · hora de México</p></div>${icon('chart',18)}</div><div class="daily-chart-grid"><div class="chart-axis" aria-label="Escala de cantidad de archivos">${[4,3,2,1,0].map(n=>`<span>${n*step}</span>`).join('')}</div><div class="chart-plot"><div class="chart-gridlines" aria-hidden="true">${[4,3,2,1,0].map(()=>'<i></i>').join('')}</div><div class="chart">${days.map(d=>`<div class="bar-group">${[['photo','photos','fotografías'],['video','videos','videos']].map(([kind,key,label])=>{const text=`${fmtDate(d.day+'T12:00:00Z',true)} · ${d[key]} ${label}`;return `<button class="chart-bar ${kind==='video'?'secondary':''}" data-action="chart-bar" data-day="${d.day}" data-count="${d[key]}" data-label="${e(text)}" aria-label="${e(text)}" aria-pressed="false"><span class="bar-fill" style="height:${d[key]/max*100}%"></span><span class="bar-tooltip" role="tooltip">${e(text)}</span></button>`;}).join('')}</div>`).join('')}</div></div><div></div><div class="chart-labels">${days.map(d=>`<span>${fmtDate(d.day+'T12:00:00Z',true)}</span>`).join('')}</div></div><div class="legend"><span><i></i>Fotografías</span><span><i class="pale"></i>Videos</span></div><p class="chart-readout" role="status" aria-live="polite">Pasa el cursor o toca una barra para ver su cantidad.</p></section>`;
+}
+function authorStatus(record){return data.memberships.find(m=>m.id===record.membershipId)?.status==='deleted'||user(record.author?.id)?.deleted?'<span class="author-deleted">Dado de baja</span>':'';}
+function deleteUserDialog(id){
+  const m=allowedMember(id);if(!m)return;
+  let error='';try{assertDeletable(data,actor(),m);}catch(e){error=e.message;}
+  showDialog('Eliminar usuario',`<p>¿Eliminar a <strong>${e(memberUser(m).name)}</strong>${m.global?'':` de ${e(campaign(m.campaignId)?.name)}`}?</p><div class="notice">${icon('shield',17)}<span>Sus registros y archivos permanecen con su nombre y la indicación «Dado de baja». Esta baja es definitiva.</span></div><p class="form-error" id="delete-error" role="alert">${e(error)}</p>`,`<button class="btn secondary" data-action="user-detail" data-id="${m.id}">Cancelar</button><button class="btn danger" data-action="confirm-delete-user" data-id="${m.id}" ${error?'disabled':''}>Confirmar eliminación</button>`);
+}
+async function deleteUser(id,button){
+  button.disabled=true;
+  try{
+    const m=assertDeletable(data,actor(),allowedMember(id));
+    if(serverMode){await api.request(m.global?'/api/users/'+m.userId:'/api/memberships/'+m.id,{method:'DELETE'});await refreshServer();}
+    else{if(m.global){user(m.userId).deleted=true;user(m.userId).active=false;}else m.status='deleted';for(const i of data.invitations)if(i.status==='pending'&&(i.membershipId===m.id||m.global&&i.userId===m.userId))i.status='revoked';data.deletions.push({id:m.id,userId:m.userId,global:!!m.global,name:memberUser(m).name,source:'demo',confirmed:false});audit('Eliminó usuario; conserva evidencias',m.id);save();void syncDeletions();}
+    modal.close();render();toast('Usuario dado de baja. Se conservan sus registros.');
+  }catch(error){document.querySelector('#delete-error').textContent=error.message;button.disabled=false;}
+}
 function dashboardPage(){
   const records=ownRecords(),cs=visibleCampaigns(data,actor()),ms=scopedMemberships(data,actor()).filter(m=>m.status==='active');
   const people=new Set(ms.map(m=>m.userId)).size;
   const photos=records.reduce((a,r)=>a+r.media.filter(m=>m.kind==='photo').length,0);
   const vids=records.reduce((a,r)=>a+r.media.filter(m=>m.kind==='video').length,0);
   const recent=[...records].sort((a,b)=>new Date(b.capturedAt)-new Date(a.capturedAt)).slice(0,3);
-  const base=serverMode?dateInMexico(new Date().toISOString()):'2026-10-06';
-  const dates=Array.from({length:4},(_,i)=>{const d=new Date(base+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+i-3);return d.toISOString().slice(0,10);});
-  const dateLabels=dates.map(day=>fmtDate(day+'T12:00:00Z',true));
-  const chartCounts=dates.map(day=>records.filter(r=>dateInMexico(r.capturedAt)===day));
-  const max=Math.max(1,...chartCounts.map(rs=>rs.reduce((a,r)=>a+r.media.length,0)));
   return `${pageHead('Todo en su lugar.',`Hola, ${e(actor().name.split(' ')[0])}. Esta es la actividad de tus equipos.`,actor().role==='admin'?`<button class="btn" data-action="new-campaign">${icon('plus',17)} Nueva campaña</button>`:'','RESUMEN DE OPERACIÓN')}
   <div class="stats">${stat('Campañas activas',cs.length,'En tu alcance de supervisión','flag',true)}${stat('Registros',records.length,serverMode?'Registros íntegros confirmados':'Evidencias de ejemplo','layers')}${stat('Personas en equipo',people,'Usuarios activos en tu alcance','users')}${stat('Archivos registrados',photos+vids,`${photos} fotos · ${vids} videos`,'camera')}</div>
   <div class="dashboard-grid"><div class="stack"><section class="card"><div class="section-heading"><div><h2>Campañas en marcha</h2><p>Un equipo detrás de cada ubicación.</p></div><button data-nav="campaigns">Ver todas ${icon('arrow',13)}</button></div>
   ${cs.map(c=>{const count=records.filter(r=>r.campaignId===c.id).length;return `<div class="campaign-mini"><div class="campaign-icon ${c.color}">${icon('flag',21)}</div><div class="text"><h3>${e(c.name)}</h3><p>${e(c.location)}</p><div class="types" style="margin-top:8px">${c.types.map(typePill).join('')}</div></div><div class="metric">${count}<small>registros</small></div><button class="icon-btn" data-action="open-campaign" data-id="${c.id}" aria-label="Ver campaña ${e(c.name)}">${icon('chevron',15)}</button></div>`;}).join('')}</section>
   <section class="card"><div class="section-heading"><div><h2>Ubicaciones registradas</h2><p>Una mirada al trabajo en campo.</p></div><button data-nav="map">Explorar mapa ${icon('arrow',13)}</button></div>${mapComponent(records.slice(0,10),'mini')}</section></div>
-  <div class="stack"><section class="card"><div class="section-heading"><div><h2>Evidencias por día</h2><p>${serverMode?'Últimos 4 días · fecha de captura':'Periodo de ejemplo · 3 al 6 de octubre'}</p></div>${icon('chart',18)}</div>
-  <div class="chart">${chartCounts.map(rs=>`<div class="bar-group"><span class="bar" title="${rs.reduce((n,r)=>n+r.media.filter(m=>m.kind==='photo').length,0)} fotos" style="height:${rs.reduce((n,r)=>n+r.media.filter(m=>m.kind==='photo').length,0)/max*100}%"></span><span class="bar secondary" title="${rs.reduce((n,r)=>n+r.media.filter(m=>m.kind==='video').length,0)} videos" style="height:${rs.reduce((n,r)=>n+r.media.filter(m=>m.kind==='video').length,0)/max*100}%"></span></div>`).join('')}</div>
-  <div class="chart-labels">${dateLabels.map(x=>`<span>${x}</span>`).join('')}</div><div class="legend"><span><i></i>Fotografías</span><span><i class="pale"></i>Videos</span></div></section>
-  <section class="card"><div class="section-heading"><div><h2>Últimos registros</h2><p>Lo más reciente de tu equipo.</p></div></div>${recent.map(r=>{const m=data.memberships.find(m=>m.id===r.membershipId);return `<div class="activity-row">${personAvatar(user(m?.userId))}<div class="text"><strong>${e(user(m?.userId)?.name)}</strong><p>${TYPE_NAMES[r.type]} · ${e(campaign(r.campaignId)?.name)}<br>${fmtDate(r.capturedAt)}</p></div><button class="icon-btn" data-action="record-detail" data-id="${r.id}" aria-label="Abrir registro ${r.number}">${icon('chevron',14)}</button></div>`;}).join('')||empty('Aún no hay registros')}</section>
+  <div class="stack">${dailyChart(records)}
+  <section class="card"><div class="section-heading"><div><h2>Últimos registros</h2><p>Lo más reciente de tu equipo.</p></div></div>${recent.map(r=>{const m=data.memberships.find(m=>m.id===r.membershipId);return `<div class="activity-row">${personAvatar(user(m?.userId))}<div class="text"><strong>${e(r.author?.name||user(m?.userId)?.name)}${authorStatus(r)}</strong><p>${TYPE_NAMES[r.type]} · ${e(campaign(r.campaignId)?.name)}<br>${fmtDate(r.capturedAt)}</p></div><button class="icon-btn" data-action="record-detail" data-id="${r.id}" aria-label="Abrir registro ${r.number}">${icon('chevron',14)}</button></div>`;}).join('')||empty('Aún no hay registros')}</section>
   <div class="notice">${icon('shield',17)}<span>La vista se ajusta a tu rol. Cambia de usuario arriba para comparar el alcance de cada equipo.</span></div></div></div>`;
 }
 function campaignsPage(){
@@ -166,12 +237,12 @@ function userList(){
   if(actor().role==='admin'){
     for(const u of data.users.filter(u=>u.role==='leader'&&!data.memberships.some(m=>m.userId===u.id))){
       const inv=data.invitations.find(i=>i.userId===u.id&&i.status==='pending');
-      all.push({id:'global:'+u.id,userId:u.id,role:'leader',campaignId:null,parentId:null,status:inv?'invited':u.active===false?'inactive':'active',global:true});
+      all.push({id:'global:'+u.id,userId:u.id,role:'leader',campaignId:null,parentId:null,status:u.deleted?'deleted':inv?'invited':u.active===false?'inactive':'active',global:true});
     }
   }
   return all.filter(m=>{
     const u=memberUser(m);
-    return (!state.userCampaign||m.campaignId===state.userCampaign)&&(!state.userRole||m.role===state.userRole)&&(state.userStatus?m.status===state.userStatus:m.status!=='transferred')&&(!needle||`${u?.name} ${u?.contact}`.toLowerCase().includes(needle));
+    return (!state.userCampaign||m.campaignId===state.userCampaign)&&(!state.userRole||m.role===state.userRole)&&(state.userStatus?m.status===state.userStatus:!['transferred','deleted'].includes(m.status))&&(!needle||`${u?.name} ${u?.contact}`.toLowerCase().includes(needle));
   });
 }
 function usersPage(){
@@ -185,7 +256,7 @@ function usersPage(){
   <div class="filters"><div class="search">${icon('search',16)}<input id="user-search" type="search" value="${e(state.usersSearch)}" aria-label="Buscar usuarios" placeholder="Buscar por nombre, correo o celular"></div>
   <select id="user-campaign" aria-label="Filtrar usuarios por campaña"><option value="">Todas las campañas</option>${campaignOptions(state.userCampaign)}</select>
   <select id="user-role" aria-label="Filtrar usuarios por rol"><option value="">Todos los roles</option>${['leader','coordinator','collaborator'].map(r=>`<option value="${r}" ${state.userRole===r?'selected':''}>${ROLE_NAMES[r]}</option>`).join('')}</select>
-  <select id="user-status" aria-label="Filtrar usuarios por estado"><option value="">Todos los estados actuales</option>${[['active','Activos'],['inactive','Inactivos'],['invited','Invitados'],['transferred','Historial de traslados']].map(([v,n])=>`<option value="${v}" ${state.userStatus===v?'selected':''}>${n}</option>`).join('')}</select></div>
+  <select id="user-status" aria-label="Filtrar usuarios por estado"><option value="">Todos los estados actuales</option>${[['active','Activos'],['inactive','Inactivos'],['invited','Invitados'],['deleted','Dados de baja'],['transferred','Historial de traslados']].map(([v,n])=>`<option value="${v}" ${state.userStatus===v?'selected':''}>${n}</option>`).join('')}</select></div>
   ${usersTree(members)}
   <details class="users-table-disclosure" id="users-table" ${state.tableOpen?'open':''}><summary>${icon('grid',18)}<span><strong>Ver tabla completa</strong><small>Contacto, campaña, superior y acciones · ${members.length} asignaciones</small></span>${icon('chevron',16)}</summary>${usersTable(members)}</details>
   <div class="table-footer"><span>${members.length} pertenencias en ${new Set(members.map(m=>m.campaignId)).size} campañas</span><span>Una baja conserva la autoría y las evidencias.</span></div>
@@ -206,7 +277,7 @@ function usersTree(members){
   const all=[...included.values()],filtered=Boolean(state.usersSearch||state.userRole||state.userStatus);
   const node=m=>{
     const u=memberUser(m),children=all.filter(x=>x.parentId===m.id),totals=teamSummary(data,m.id),open=filtered||(state.branchOpen[m.id]??m.role==='leader');
-    const person=`<button class="tree-person ${matches.has(m.id)?'':'context-person'}" data-action="user-detail" data-id="${m.id}" aria-label="Ver ${e(u.name)}">${personAvatar(u)}<span class="tree-person-text"><strong>${e(u.name)}</strong><small>${ROLE_NAMES[m.role]}${matches.has(m.id)?'':' · Superior'}${m.status!=='active'?' · '+({inactive:'Inactivo',invited:'Invitado',transferred:'Historial'}[m.status]||m.status):''}</small></span><span class="tree-total"><strong>${totals.records}</strong><small>registros</small></span>${icon('eye',16)}</button>`;
+    const person=`<button class="tree-person ${matches.has(m.id)?'':'context-person'}" data-action="user-detail" data-id="${m.id}" aria-label="Ver ${e(u.name)}">${personAvatar(u)}<span class="tree-person-text"><strong>${e(u.name)}</strong><small>${ROLE_NAMES[m.role]}${matches.has(m.id)?'':' · Superior'}${m.status!=='active'?' · '+({inactive:'Inactivo',invited:'Invitado',deleted:'Dado de baja',transferred:'Historial'}[m.status]||m.status):''}</small></span><span class="tree-total"><strong>${totals.records}</strong><small>registros</small></span>${icon('eye',16)}</button>`;
     return children.length?`<details class="person-branch" data-branch="${m.id}" ${open?'open':''}><summary aria-label="Desplegar equipo de ${e(u.name)}"><span class="branch-chevron">${icon('chevron',16)}</span>${person}</summary><div class="people-children">${children.map(node).join('')}</div></details>`:`<div class="tree-leaf">${person}</div>`;
   };
   const groups=[...new Set(all.map(m=>m.campaignId))];
@@ -224,7 +295,7 @@ function evidencePage(){
   ${recordFilters()}<div class="between" style="margin-bottom:18px"><span class="muted" style="font-size:11px">${rs.length} registros en tu alcance</span><span class="pill">${icon('shield',12)} Originales sellados</span></div>
   <div class="evidence-grid">${[...rs].sort((a,b)=>new Date(b.capturedAt)-new Date(a.capturedAt)).map((r,i)=>{
     const m=data.memberships.find(m=>m.id===r.membershipId),photos=r.media.filter(m=>m.kind==='photo').length,vids=r.media.length-photos;
-    return `<button class="card evidence-card" data-action="record-detail" data-id="${r.id}">${evidenceArt(r,i).replace('</div>',`<span class="photo-count">${icon('camera',12)} ${photos} ${vids?`· ${icon('video',12)} ${vids}`:''}</span></div>`)}<div class="evidence-body"><div class="between">${typePill(r.type)}<span class="muted" style="font-size:10px">#${String(r.number).padStart(3,'0')}</span></div><h3>${e(campaign(r.campaignId)?.name)}</h3><p>${e(user(m?.userId)?.name)}</p><div class="meta"><span>${fmtDate(r.capturedAt)}</span><span>${Number.isFinite(r.accuracy)?'GPS ±'+r.accuracy+' m':'Sin GPS'}</span></div></div></button>`;
+    return `<button class="card evidence-card" data-action="record-detail" data-id="${r.id}">${evidenceArt(r,i).replace('</div>',`<span class="photo-count">${icon('camera',12)} ${photos} ${vids?`· ${icon('video',12)} ${vids}`:''}</span></div>`)}<div class="evidence-body"><div class="between">${typePill(r.type)}<span class="muted" style="font-size:10px">#${String(r.number).padStart(3,'0')}</span></div><h3>${e(campaign(r.campaignId)?.name)}</h3><p>${e(r.author?.name||user(m?.userId)?.name)}${authorStatus(r)}</p><div class="meta"><span>${fmtDate(r.capturedAt)}</span><span>${Number.isFinite(r.accuracy)?'GPS ±'+r.accuracy+' m':'Sin GPS'}</span></div></div></button>`;
   }).join('')}</div>${!rs.length?`<div class="card">${empty('Sin evidencias con estos filtros')}</div>`:''}`;
 }
 function mapComponent(records,mode='full'){
@@ -254,7 +325,7 @@ function draft(){
 }
 function capturePage(){
   if(serverMode)return `<div class="capture-wrap">${pageHead('Captura móvil','Tu cuenta ya está conectada al servidor.','','TRABAJO DE CAMPO')}<div class="card capture-success"><div class="success-icon">${icon('camera',30)}</div><h2>Próximo paso: app de captura</h2><p>El servidor ya recibe y verifica evidencias. La cámara, GPS y conservación cifrada en el celular se conectarán desde la app móvil.</p><div class="notice amber">${icon('info',17)}<span>En esta versión del panel no se capturan ni se simulan archivos reales.</span></div><button class="btn" data-nav="sync">Ver mis registros</button></div></div>`;
-  if(state.successId){const r=data.records.find(r=>r.id===state.successId);return `<div class="capture-wrap">${pageHead('Registro listo','Tu evidencia de ejemplo quedó sellada.','','TRABAJO DE CAMPO')}<div class="card capture-success"><div class="success-icon">${icon('check',32)}</div><h2>Registro demo guardado</h2><p>Ya no se puede modificar ni eliminar desde esta vista. Puedes revisar el estado en Mis envíos.</p>${statusPill(r.status)}<div class="notice amber">${icon('info',17)}<span>En esta demo solo se guardan datos ficticios en el navegador, sin cifrado ni copia en la nube.</span></div><button class="btn" data-nav="sync">${icon('upload',17)} Ver mis envíos</button><button class="btn secondary" data-action="new-record">Crear otro registro</button></div></div>`;}
+  if(state.successId){const r=data.records.find(r=>r.id===state.successId);return `<div class="capture-wrap">${pageHead('Registro listo','Tu evidencia de ejemplo quedó sellada.','','TRABAJO DE CAMPO')}<div class="card capture-success"><div class="success-icon">${icon('check',32)}</div><h2>Registro demo guardado</h2><p>Ya no se puede modificar ni eliminar desde esta vista. Puedes revisar el estado en Mis envíos.</p>${recordStatus(r)}<div class="notice amber">${icon('info',17)}<span>${r.cloudReceipt?'Los metadatos de este registro de prueba están confirmados en la nube.':'El registro de prueba está conservado en este dispositivo y pendiente de confirmación en la nube.'} Las fotos y videos son ilustraciones; la captura real y el cifrado en Android siguen pendientes.</span></div><button class="btn" data-nav="sync">${icon('upload',17)} Ver mis envíos</button><button class="btn secondary" data-action="new-record">Crear otro registro</button></div></div>`;}
   const d=draft(),cs=captureCampaigns(data,actor()),c=cs.find(c=>c.id===d.campaignId),photos=d.media.filter(m=>m.kind==='photo').length,vids=d.media.filter(m=>m.kind==='video').length;
   if(!c) return `${pageHead('Nuevo registro','Captura de evidencias')}<div class="card">${empty(d.media.length?'Borrador conservado: su campaña ya no está activa en tu equipo. Contacta al administrador antes de continuar.':'No tienes campañas activas asignadas')}</div>`;
   return `<div class="capture-wrap">${pageHead('Nuevo registro','Todo lo que necesitas, en un solo registro.','','TRABAJO DE CAMPO')}
@@ -269,16 +340,16 @@ function capturePage(){
 }
 function syncPage(){
   const rs=ownRecords(),pending=rs.filter(r=>r.status==='pending');
-  if(serverMode)return `${pageHead('Mis registros','Evidencias confirmadas por el servidor.','','TRABAJO DE CAMPO')}<div class="notice">${icon('shield',16)}<span>Solo aparecen registros con todos sus archivos verificados. La cola pendiente del teléfono se conectará en la app móvil.</span></div><div class="card" style="margin-top:20px">${rs.map(r=>`<div class="sync-row"><div><h3>${e(r.campaignName)}</h3><p>#${r.number} · ${r.media.length} archivos · ${fmtDate(r.capturedAt)}</p></div><button class="btn secondary" data-action="record-detail" data-id="${r.id}">Ver evidencia</button></div>`).join('')||empty('Aún no hay registros confirmados')}</div>`;
+  if(serverMode)return `${pageHead('Mis registros','Evidencias confirmadas por el servidor.','','TRABAJO DE CAMPO')}<div class="notice">${icon('shield',16)}<span>Solo aparecen registros con todos sus archivos verificados. La cola pendiente del teléfono se conectará en la app móvil.</span></div>${dailyChart(rs)}<div class="card" style="margin-top:20px">${rs.map(r=>`<div class="sync-row"><div><h3>${e(r.campaignName)}</h3><p>#${r.number} · ${r.media.length} archivos · ${fmtDate(r.capturedAt)}</p></div><button class="btn secondary" data-action="record-detail" data-id="${r.id}">Ver evidencia</button></div>`).join('')||empty('Aún no hay registros confirmados')}</div>`;
   return `${pageHead('Mis envíos','Revisa el estado de tus registros de ejemplo.','','TRABAJO DE CAMPO')}
-  <div class="sync-banner"><div><h2>${pending.length?'Hay trabajo listo para enviar.':'Tus envíos están al día.'}</h2><p>${pending.length} registros pendientes · los originales permanecen sellados.<br>La sincronización de esta vista es una simulación.</p></div><button class="btn lime" data-action="sync" ${!pending.length?'disabled':''}>${icon('upload',17)} Simular actualización</button></div>
-  <div class="card"><div class="section-heading"><h2>Registros de ${e(actor().name.split(' ')[0])}</h2><span class="pill">${rs.length} registros</span></div>${[...rs].sort((a,b)=>new Date(b.capturedAt)-new Date(a.capturedAt)).map(r=>`<div class="sync-row"><div class="row"><div class="campaign-icon">${icon('camera',20)}</div><div><h3>${e(campaign(r.campaignId)?.name)}</h3><p>${TYPE_NAMES[r.type]} · ${r.media.length} archivos · ${fmtDate(r.capturedAt)}<br>${r.number?'#'+String(r.number).padStart(3,'0'):'Número final pendiente'}</p></div></div><div class="row">${statusPill(r.status)}<button class="icon-btn" data-action="record-detail" data-id="${r.id}" aria-label="Ver registro">${icon('eye',16)}</button></div></div>`).join('')||empty('Aún no tienes registros')}</div><div class="notice amber" style="margin-top:18px">${icon('info',17)}<span>Estos cambios solo afectan la demostración. No hay transferencia de archivos ni almacenamiento en la nube.</span></div>`;
+  <div class="sync-banner"><div><h2>${pending.length?'Hay trabajo listo para enviar.':'Tus envíos están al día.'}</h2><p>${pending.length} registros pendientes · los originales permanecen sellados.<br>${state.cloudBusy?'Enviando registros de prueba…':pending.some(r=>r.cloudError)?e(pending.find(r=>r.cloudError).cloudError):cloud?'Al sellar se envía automáticamente. Si falla, se conserva para reintentar.':'Esta copia no tiene un servicio de nube conectado. Los registros permanecen pendientes.'}</p></div><button class="btn lime" data-action="sync" ${!pending.length||state.cloudBusy?'disabled':''}>${icon('upload',17)} ${state.cloudBusy?'Actualizando…':'Actualizar a la nube'}</button></div>
+  ${dailyChart(rs)}<div class="card"><div class="section-heading"><h2>Registros de ${e(actor().name.split(' ')[0])}</h2><span class="pill">${rs.length} registros</span></div>${[...rs].sort((a,b)=>new Date(b.capturedAt)-new Date(a.capturedAt)).map(r=>`<div class="sync-row"><div class="row"><div class="campaign-icon">${icon('camera',20)}</div><div><h3>${e(campaign(r.campaignId)?.name)}</h3><p>${TYPE_NAMES[r.type]} · ${r.media.length} archivos · ${fmtDate(r.capturedAt)}<br>${r.number?'#'+String(r.number).padStart(3,'0'):'Número final pendiente'}</p></div></div><div class="row">${recordStatus(r)}<button class="icon-btn" data-action="record-detail" data-id="${r.id}" aria-label="Ver registro">${icon('eye',16)}</button></div></div>`).join('')||empty('Aún no tienes registros')}</div><div class="notice amber" style="margin-top:18px">${icon('info',17)}<span>La nube almacena los metadatos de registros de prueba; no se transfieren archivos de fotos o videos reales. La cola de este prototipo no tiene cifrado en el dispositivo.</span></div>`;
 }
 function showDialog(title,body,foot=''){
   modal.innerHTML=`<div class="dialog-head"><h2 id="dialog-title">${title}</h2><button class="icon-btn" data-action="close-dialog" aria-label="Cerrar ventana">${icon('close',18)}</button></div><div class="dialog-body">${body}</div>${foot?`<div class="dialog-foot">${foot}</div>`:''}`;
   if(!modal.open) modal.showModal();
 }
-function allowedMember(id){return scopedMemberships(data,actor()).find(m=>m.id===id)||(actor().role==='admin'&&id.startsWith('global:')&&user(id.slice(7))?{id,userId:id.slice(7),global:true,role:'leader',status:data.invitations.some(i=>i.userId===id.slice(7)&&i.status==='pending')?'invited':user(id.slice(7))?.active===false?'inactive':'active'}:null);}
+function allowedMember(id){return scopedMemberships(data,actor()).find(m=>m.id===id)||(actor().role==='admin'&&id.startsWith('global:')&&user(id.slice(7))?{id,userId:id.slice(7),global:true,role:'leader',status:user(id.slice(7))?.deleted?'deleted':data.invitations.some(i=>i.userId===id.slice(7)&&i.status==='pending')?'invited':user(id.slice(7))?.active===false?'inactive':'active'}:null);}
 function userDialog(id,edit=false){
   const m=allowedMember(id);
   if(!m||edit&&!canEdit(m)){toast('No tienes permiso para modificar este usuario.');return;}
@@ -295,7 +366,7 @@ function userDialog(id,edit=false){
     const editable=canEdit(m);
     const name=editable?`<h2><button class="profile-name" data-action="edit-profile-name" data-id="${m.id}" aria-label="Editar nombre de ${e(u.name)}" title="Toca o mantén presionado para editar">${e(u.name)}${icon('edit',15)}</button></h2>`:`<h2>${e(u.name)}</h2>`;
     const status=editable?`<button class="profile-status pill ${m.status==='active'?'green':''}" data-action="toggle-user-status" data-id="${m.id}" aria-label="${m.status==='active'?'Desactivar':'Activar'} a ${e(u.name)}" aria-pressed="${m.status==='active'}"><i class="dot"></i>${m.status==='active'?'Activo':'Inactivo'}</button>`:statusPill(m.status);
-    showDialog('Ficha del usuario',`<div class="row profile-heading">${personAvatar(u,true)}<div class="profile-heading-content"><div id="profile-name-slot">${name}</div><div class="profile-controls">${rolePill(m.role)}${status}${canMove(m)?`<button class="profile-change" data-action="move-user" data-id="${m.id}" aria-label="Cambiar campaña de ${e(u.name)}">${icon('arrow',18)} Cambiar</button>`:''}</div></div></div><p class="profile-edit-hint">${editable?'Toca el nombre para editarlo y el estado para activarlo o desactivarlo.':'Consulta de la rama autorizada. Su superior directo administra este usuario.'}</p><div class="form-error" id="profile-error" role="alert"></div><div class="details-grid"><div><small>Correo o celular${serverMode?'':' · ejemplo'}</small><strong>${e(u.contact)}</strong></div><div><small>Campaña</small><strong>${e(campaign(m.campaignId)?.name||'Sin asignar')}</strong></div><div><small>Superior directo</small><strong>${e(parent?memberUser(parent).name:'Administrador')}</strong></div><div><small>Registros propios</small><strong>${totals.own}</strong></div></div><section class="team-summary"><h3>Resumen de su equipo</h3><div class="team-totals"><div><strong data-total="records">${totals.records}</strong><small>Registros</small></div><div><strong data-total="photos">${totals.photos}</strong><small>Fotos</small></div><div><strong data-total="videos">${totals.videos}</strong><small>Videos</small></div><div><strong data-total="people">${totals.people}</strong><small>Personas activas</small></div></div><p class="sub">Totales de esta campaña, incluida la persona seleccionada y las evidencias históricas de su rama.</p></section>`,`<button class="btn secondary" data-action="close-dialog">Cerrar</button>${inv&&canManageMember(data,actor(),m)?`<button class="btn secondary" data-action="view-invitation" data-id="${inv.id}">Ver invitación</button>`:''}`);
+    showDialog('Ficha del usuario',`<div class="row profile-heading">${personAvatar(u,true)}<div class="profile-heading-content"><div id="profile-name-slot">${name}</div><div class="profile-controls">${rolePill(m.role)}${status}${canMove(m)?`<button class="profile-change" data-action="move-user" data-id="${m.id}" aria-label="Cambiar campaña de ${e(u.name)}">${icon('arrow',18)} Cambiar</button>`:''}</div></div></div><p class="profile-edit-hint">${editable?'Toca el nombre para editarlo y el estado para activarlo o desactivarlo.':'Consulta de la rama autorizada. Su superior directo administra este usuario.'}</p><div class="form-error" id="profile-error" role="alert"></div><div class="details-grid"><div><small>Correo o celular${serverMode?'':' · ejemplo'}</small><strong>${e(u.contact)}</strong></div><div><small>Campaña</small><strong>${e(campaign(m.campaignId)?.name||'Sin asignar')}</strong></div><div><small>Superior directo</small><strong>${e(parent?memberUser(parent).name:'Administrador')}</strong></div><div><small>Registros propios</small><strong>${totals.own}</strong></div></div><section class="team-summary"><h3>Resumen de su equipo</h3><div class="team-totals"><div><strong data-total="records">${totals.records}</strong><small>Registros</small></div><div><strong data-total="photos">${totals.photos}</strong><small>Fotos</small></div><div><strong data-total="videos">${totals.videos}</strong><small>Videos</small></div><div><strong data-total="people">${totals.people}</strong><small>Personas activas</small></div></div><p class="sub">Totales de esta campaña, incluida la persona seleccionada y las evidencias históricas de su rama.</p></section>`,`<button class="btn secondary" data-action="close-dialog">Cerrar</button>${!['deleted','transferred'].includes(m.status)&&(m.global?actor().role==='admin':canManageMember(data,actor(),m))?`<button class="btn danger" data-action="delete-user" data-id="${m.id}">${icon('trash',16)} Eliminar usuario</button>`:''}${inv&&canManageMember(data,actor(),m)?`<button class="btn secondary" data-action="view-invitation" data-id="${inv.id}">Ver invitación</button>`:''}`);
   }
 }
 function manualUserDialog(){
@@ -379,12 +450,12 @@ function recordDialog(id,seq=1){
   const m=data.memberships.find(m=>m.id===r.membershipId),u=r.author||user(m?.userId),selected=r.media[seq-1]||r.media[0];
   const filename=r.number?finalFilename(r.campaignName||campaign(r.campaignId)?.name||'Campaña',r.number,seq,selected.kind==='video'?'mp4':'jpg'):'Nombre final pendiente de sincronización';
   showDialog(`Registro ${r.number?'#'+String(r.number).padStart(3,'0'):'pendiente'}`,`<div class="between"><span>${e(campaign(r.campaignId)?.name)}</span>${typePill(r.type)}</div>${serverMode?`<div class="photo-art">${selected.kind==='photo'?`<img src="/api/records/${r.id}/media/${selected.id}" alt="Evidencia registrada" style="width:100%;height:100%;object-fit:contain">`:`<video controls playsinline src="/api/records/${r.id}/media/${selected.id}" style="width:100%;height:100%"></video>`}</div>`:selected.kind==='photo'?photoArt(seq):`<div class="media-placeholder"><div>${icon('video',42)}<p>Video de ejemplo</p><small>No se ha grabado un archivo real.</small></div></div>`}<div class="detail-media-tabs">${r.media.map((x,i)=>`<button class="${seq===i+1?'active':''}" data-action="record-media" data-id="${r.id}" data-seq="${i+1}">${x.kind==='photo'?'Foto':'Video'} ${i+1}</button>`).join('')}</div>
-  <p class="muted" style="font-size:10px;overflow-wrap:anywhere">${e(filename)}</p><div class="details-grid"><div><small>Colaborador</small><strong>${e(r.author?.name||u?.name)}</strong></div><div><small>${selected.kind==='video'?'Inicio de grabación':'Fecha y hora'} ${serverMode?'':'· ejemplo'}</small><strong>${fmtDate(selected.capturedAt||r.capturedAt)}</strong></div><div><small>${serverMode?'GPS al capturar':'GPS de ejemplo'} · precisión ±${r.accuracy} m</small><strong>${gpsLabel(r)}</strong></div><div><small>Dispositivo ${serverMode?'':'· ejemplo'}</small><strong>${e(r.device.brand)} · ${e(r.device.model)}</strong></div><div><small>Identificador de instalación</small><strong style="overflow-wrap:anywhere">${e(r.device.installationId)}</strong></div><div><small>Estado</small>${statusPill(r.status)}</div></div><div><label>Notas</label><p class="sub" style="font-size:12px">${e(r.notes||'Sin notas.')}</p></div><div class="notice">${icon('shield',16)}<span>Registro sellado. Las evidencias originales no pueden modificarse ni eliminarse desde esta vista.</span></div>`,`<button class="btn secondary" data-action="close-dialog">Cerrar</button>`);
+  <p class="muted" style="font-size:10px;overflow-wrap:anywhere">${e(filename)}</p><div class="details-grid"><div><small>Colaborador</small><strong>${e(r.author?.name||u?.name)}${authorStatus(r)}</strong></div><div><small>${selected.kind==='video'?'Inicio de grabación':'Fecha y hora'} ${serverMode?'':'· ejemplo'}</small><strong>${fmtDate(selected.capturedAt||r.capturedAt)}</strong></div><div><small>${serverMode?'GPS al capturar':'GPS de ejemplo'} · precisión ±${r.accuracy} m</small><strong>${gpsLabel(r)}</strong></div><div><small>Dispositivo ${serverMode?'':'· ejemplo'}</small><strong>${e(r.device.brand)} · ${e(r.device.model)}</strong></div><div><small>Identificador de instalación</small><strong style="overflow-wrap:anywhere">${e(r.device.installationId)}</strong></div><div><small>Estado</small>${recordStatus(r)}</div></div><div><label>Notas</label><p class="sub" style="font-size:12px">${e(r.notes||'Sin notas.')}</p></div><div class="notice">${icon('shield',16)}<span>Registro sellado. Las evidencias originales no pueden modificarse ni eliminarse desde esta vista.</span></div>`,`<button class="btn secondary" data-action="close-dialog">Cerrar</button>`);
 }
 
 document.addEventListener('click',async event=>{
   const nav=event.target.closest('[data-nav]');
-  if(nav){navigate(nav.dataset.nav);return;}
+  if(nav){event.preventDefault();navigate(nav.dataset.nav);return;}
   const target=event.target.closest('[data-action]');
   if(!target) return;
   const {action,id,mode,kind,index,layout,seq,channel}=target.dataset;
@@ -405,9 +476,12 @@ document.addEventListener('click',async event=>{
     case 'login-mode':state.loginMode=mode;renderLogin();break;
     case 'login-back':state.loginStep=1;renderLogin();break;
     case 'new-campaign':campaignDialog();break;
-    case 'open-campaign':state.filters={campaign:id,types:[],from:'',to:''};navigate('evidence');break;
+    case 'open-campaign':state.filters={campaign:id,types:[...campaign(id).types],from:'',to:''};navigate('evidence');break;
     case 'invite-user':inviteDialog();break;
     case 'new-user':manualUserDialog();break;
+    case 'delete-user':deleteUserDialog(id);break;
+    case 'confirm-delete-user':await deleteUser(id,target);break;
+    case 'chart-bar':{const chart=target.closest('.daily-chart');chart.querySelectorAll('.chart-bar').forEach(b=>b.setAttribute('aria-pressed',String(b===target)));chart.querySelector('.chart-readout').textContent=target.dataset.label;break;}
     case 'move-user':moveUserDialog(id);break;
     case 'edit-profile-name':editProfileName(id);break;
     case 'cancel-profile-name':userDialog(id);break;
@@ -427,7 +501,7 @@ document.addEventListener('click',async event=>{
     case 'expand-teams':case 'collapse-teams':for(const m of scopedMemberships(data,actor()))state.branchOpen[m.id]=action==='expand-teams';render();break;
     case 'record-detail':recordDialog(id);break;
     case 'record-media':recordDialog(id,Number(seq));break;
-    case 'clear-filters':state.filters={campaign:'',types:[],from:'',to:''};render();break;
+    case 'clear-filters':state.filters={campaign:'',types:Object.keys(TYPE_NAMES),from:'',to:''};render();break;
     case 'add-media':{
       const d=draft();assertEditable(d);
       if(kind!=='photo'&&kind!=='video')return;
@@ -440,18 +514,11 @@ document.addEventListener('click',async event=>{
     }
     case 'seal-record':{
       const d=draft();try{assertEditable(d);const member=assertCapture(data,actor(),d.campaignId,d.type,d.media);
-      const record={...structuredClone(d),membershipId:member.id,status:'pending',number:null,lat:19.705,lng:-101.198,accuracy:6,device:{name:'Equipo demo',brand:'Samsung',model:'SM-A566E',installationId:'demo-installation-'+actor().id}};
-      data.records.push(record);delete data.drafts[actor().id];save();state.successId=record.id;render();}catch(err){toast(err.message);}break;
+      const record={...structuredClone(d),source:'demo',author:{id:actor().id,name:memberUser(member).name},campaignName:campaign(d.campaignId).name,membershipId:member.id,status:'pending',number:null,lat:19.705,lng:-101.198,accuracy:6,device:{name:'Equipo demo',brand:'Samsung',model:'SM-A566E',installationId:'demo-installation-'+actor().id}};
+      record.cloudPayload=cloudPayload(record);data.records.push(record);if(!save()){data.records.pop();return;}delete data.drafts[actor().id];save();state.successId=record.id;render();await syncCloud();}catch(err){toast(err.message);}break;
     }
     case 'new-record':delete data.drafts[actor().id];state.successId=null;save();navigate('capture');break;
-    case 'sync':{
-      let count=0;
-      for(const r of ownRecords().filter(r=>r.status==='pending')){
-        r.number=Math.max(0,...data.records.filter(x=>x.campaignId===r.campaignId).map(x=>x.number||0))+1;
-        r.status='synced';count++;
-      }
-      save();render();toast(`${count} registros actualizados en la demo. No se enviaron archivos.`);break;
-    }
+    case 'sync':await syncCloud(true);break;
     case 'invite-channel':toast(`Vista ${channel}: integración pendiente. No se ha enviado ninguna invitación.`);break;
     case 'revoke-invite':{
       const inv=data.invitations.find(i=>i.id===id),m=data.memberships.find(m=>m.id===inv?.membershipId);
@@ -475,12 +542,12 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape'&&event.targe
 document.addEventListener('change',event=>{
   const el=event.target;
   if(el.id==='demo-role'){
-    state.actorId=el.value;state.filters={campaign:'',types:[],from:'',to:''};state.usersSearch='';state.userCampaign='';state.userRole='';state.userStatus='';state.successId=null;
+    state.actorId=el.value;state.filters={campaign:'',types:Object.keys(TYPE_NAMES),from:'',to:''};state.usersSearch='';state.userCampaign='';state.userRole='';state.userStatus='';state.successId=null;
     state.view=actor().role==='collaborator'?'capture':'dashboard';render();return;
   }
   const userFilters={'user-campaign':'userCampaign','user-role':'userRole','user-status':'userStatus'};
   if(userFilters[el.id]){state[userFilters[el.id]]=el.value;render();return;}
-  if(el.id==='filter-campaign'){state.filters.campaign=el.value;state.filters.types=[];render();return;}
+  if(el.id==='filter-campaign'){state.filters.campaign=el.value;state.filters.types=el.value?[...campaign(el.value).types]:Object.keys(TYPE_NAMES);render();return;}
   if(el.id==='filter-from'||el.id==='filter-to'){state.filters[el.id==='filter-from'?'from':'to']=el.value;render();return;}
   if(el.name==='filter-type'){state.filters.types=[...document.querySelectorAll('[name="filter-type"]:checked')].map(x=>x.value);render();return;}
   if(el.id==='capture-campaign'){const d=draft(),c=captureCampaigns(data,actor()).find(c=>c.id===el.value);if(d.media.length||!c)return;d.campaignId=c.id;d.type=c.types.length===1?c.types[0]:'';save();render();return;}
@@ -614,4 +681,5 @@ document.addEventListener('submit',async event=>{
   }
 });
 modal.addEventListener('click',event=>{if(event.target===modal){const bounds=modal.getBoundingClientRect();if(event.clientX<bounds.left||event.clientX>bounds.right||event.clientY<bounds.top||event.clientY>bounds.bottom)modal.close();}});
-if(serverMode)bootServer();else render();
+if(serverMode)bootServer();else{render();if(cloud)bootCloud();}
+window.addEventListener('online',()=>{if(cloud){syncDeletions();syncCloud();}});

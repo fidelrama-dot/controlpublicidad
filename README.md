@@ -3,7 +3,7 @@
 Sistema de evidencias fotográficas y videos con GPS para campañas de lonas, espectaculares y bardas.
 
 ## Estado
-Versión 0.4: panel conectado a un servidor local de desarrollo, además del prototipo autónomo.
+Versión 0.5: panel conectado a un servidor local de desarrollo, además del prototipo autónomo.
 El servidor guarda usuarios, campañas, pertenencias, invitaciones y sesiones en SQLite; aplica permisos por rama en cada operación.
 Las invitaciones tienen contacto verificado, caducidad y uso único. El acceso local usa códigos aleatorios de prueba con vencimiento y límite de intentos.
 La API recibe archivos por fragmentos reanudables, los cifra en el servidor y solo confirma el registro tras verificar todos sus hashes.
@@ -19,7 +19,7 @@ Abre `index.html` en un navegador. Es un archivo autónomo, sin recursos externo
 Continúa con el contacto de ejemplo y usa el código de demostración `123456`.
 El selector superior permite explorar los cuatro roles y comparar dos equipos.
 Todas las fotografías y videos son ejemplos; no se abre la cámara ni se consultan coordenadas del teléfono.
-Crear campañas, dar de alta/baja usuarios manualmente, modificarlos, trasladar colaboradores, generar invitaciones y sellar/sincronizar registros afecta solo a la demo del navegador.
+Los usuarios, campañas, traslados y borradores de la vista de prueba se conservan en el navegador. Al sellar, la vista privada publicada guarda automáticamente los metadatos ficticios en D1. Un fallo conserva el registro pendiente y permite reintentar con «Actualizar a la nube». Las marcas de baja también se respaldan en D1. El archivo autónomo sin servicio conectado mantiene la cola pendiente y ya no simula confirmaciones.
 Los borradores y cambios ficticios se guardan en localStorage sin cifrado. No introducir datos personales ni evidencias reales.
 Al abrir el archivo autónomo los permisos son reglas de interfaz de demostración. Al iniciar el servidor se validan también en cada solicitud de la API.
 El esquema del mapa no representa cartografía real; sus puntos abren registros de ejemplo.
@@ -41,7 +41,7 @@ Fuentes del panel: `src/domain.mjs`, `src/api.mjs`, `src/app.mjs`, `src/styles.c
 Servidor: `server/store.mjs`, `server/service.mjs`, `server/files.mjs`, `server/http.mjs` y `server/index.mjs`.
 `node build.mjs` genera el archivo autónomo `index.html`; no necesita dependencias instaladas.
 Las pruebas de dominio, servidor, cliente y pantallas conectadas usan datos ficticios, archivos temporales, HTTP real y JSDOM.
-Verificación: 46 pruebas automatizadas. Incluyen recuperación tras reinicio y corte de conexión, permisos de API, CSRF, invitaciones y sellado inmutable. Revisión visual en navegador pendiente.
+Verificación: 56 pruebas automatizadas. Incluyen recuperación tras reinicio y corte de conexión, permisos de API, CSRF, invitaciones y sellado inmutable. Revisión visual en navegador pendiente.
 
 ## Conservación en esta versión
 SQLite usa transacciones, WAL y sincronización completa. Los archivos recibidos se guardan por fragmentos con AES-256-GCM y escritura atómica.
@@ -186,3 +186,14 @@ Las tareas se mencionan en los permisos; su flujo y campos quedan por definir.
 
 ## Pruebas
 `npm test`: prototipo y panel conectado, permisos en servidor, persistencia, verificación de acceso, invitaciones de un solo uso, envíos reanudables, cifrado de fragmentos, integridad y bloqueo de cambios.
+
+## Panel y nube de prueba (0.5)
+El logo y la ruta superior enlazan al inicio y a la página actual. Resumen y Mis envíos comparten una gráfica diaria con escala numérica, conteo independiente de fotografías/videos y consulta por cursor, teclado o toque. Evidencias inicia con todos los tipos permitidos seleccionados; desmarcarlos todos muestra cero registros.
+
+Los avatares distinguen líder (azul), coordinador (verde) y colaborador (amarillo). La diagonal roja identifica inactividad. Eliminar requiere confirmación y deja la asignación en `deleted`, sin borrar evidencias ni su autor. El histórico tiene un filtro «Dados de baja». Un superior con personas actuales debe resolverlas primero; la campaña conserva su líder. La autorización por rama se valida también en la API local.
+
+`cloud/worker.mjs` implementa la persistencia de metadatos ficticios y marcas de baja en D1 para la vista privada de Sites. La identidad de ChatGPT proporcionada por Sites separa el almacenamiento del propietario. Los roles seleccionables continúan siendo personajes de demostración, sin autenticación de cuentas reales. La nube devuelve una confirmación por UUID; reintentar conserva contenido y numeración, y rechaza modificaciones del mismo registro. El panel recupera copias confirmadas sin borrar datos locales ni sustituir asignaciones existentes. Referencias históricas faltantes se recuperan sin habilitar captura.
+
+`cloud/db/schema.ts` y `cloud/drizzle/` contienen el esquema y las migraciones generadas. En el checkout de Sites se copian a `db/schema.ts` y `drizzle/`; el despliegue aplica las migraciones antes de publicar el Worker. No se crean tablas desde las solicitudes. `cloud/build.mjs` empaqueta el panel en un Worker ESM; se ejecuta después de `build.mjs` en el checkout de Sites.
+
+Esta persistencia NO recibe fotos o videos reales: las vistas de captura siguen usando ilustraciones y metadatos de ejemplo. Los borradores y la cola local del prototipo no están cifrados. La cámara/GPS reales, bóveda offline cifrada y entrega de OTP en Android continúan pendientes. No usar esta prueba para la única captura de un trabajo real.

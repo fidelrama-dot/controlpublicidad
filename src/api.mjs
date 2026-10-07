@@ -35,3 +35,19 @@ export class ApiClient {
     return this.request(`/api/records/${manifest.id}/finalize`,{method:'POST'});
   }
 }
+
+// Private hosted prototype: real cloud persistence for DEMO metadata only.
+export class PreviewCloudClient {
+  constructor(fetcher=globalThis.fetch.bind(globalThis)){this.fetch=fetcher;}
+  async request(method,body,path='/api/preview/records'){
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
+    try{
+      const response=await this.fetch(path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:controller.signal});
+      const value=await response.json();if(!response.ok)throw Error(value.error||'No se pudo confirmar el registro en la nube.');return value;
+    }catch(error){if(error.name==='AbortError'||error instanceof TypeError)throw Error('Sin conexión con la nube. El registro sigue pendiente en este dispositivo.');throw error;}
+    finally{clearTimeout(timer);}
+  }
+  list(){return this.request('GET');}
+  save(payload){return this.request('POST',payload);}
+  deletion(payload){return this.request('POST',payload,'/api/preview/deletions');}
+}

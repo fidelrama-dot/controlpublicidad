@@ -62,6 +62,7 @@ export class Store {
         campaign_id TEXT, action TEXT NOT NULL, target TEXT NOT NULL, at TEXT NOT NULL
       );
     `);
+    if(!this.all('PRAGMA table_info(users)').some(c=>c.name==='deleted'))this.db.exec('ALTER TABLE users ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0');
     // Version memberships on transfer so immutable records keep their original branch.
     if(/UNIQUE\s*\(campaign_id\s*,\s*user_id\)/i.test(this.get("SELECT sql FROM sqlite_master WHERE name='memberships'").sql)){
       this.db.exec(`PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;
@@ -70,9 +71,10 @@ export class Store {
         DROP TABLE memberships; ALTER TABLE memberships_new RENAME TO memberships;
         COMMIT; PRAGMA foreign_keys=ON;`);
     }
+    if(this.get("SELECT sql FROM sqlite_master WHERE name='current_campaign_user'")?.sql.includes("status!='transferred'"))this.db.exec('DROP INDEX current_campaign_user');
     this.db.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS one_leader_per_campaign ON memberships(campaign_id) WHERE role='leader';
-      CREATE UNIQUE INDEX IF NOT EXISTS current_campaign_user ON memberships(campaign_id,user_id) WHERE status!='transferred';
+      CREATE UNIQUE INDEX IF NOT EXISTS current_campaign_user ON memberships(campaign_id,user_id) WHERE status NOT IN ('transferred','deleted');
       CREATE TRIGGER IF NOT EXISTS valid_parent BEFORE INSERT ON memberships BEGIN
         SELECT CASE WHEN NEW.role='leader' AND NEW.parent_id IS NOT NULL THEN RAISE(ABORT,'Leader cannot have a parent') END;
         SELECT CASE WHEN NEW.role!='leader' AND NOT EXISTS(SELECT 1 FROM memberships p WHERE p.id=NEW.parent_id AND p.campaign_id=NEW.campaign_id AND p.role=CASE NEW.role WHEN 'coordinator' THEN 'leader' ELSE 'coordinator' END) THEN RAISE(ABORT,'Invalid membership parent') END;
@@ -90,7 +92,7 @@ export class Store {
   close(){this.db.close();}
   snapshot(){
     return {
-      users:this.all('SELECT * FROM users').map(u=>({id:u.id,name:u.name,contact:u.contact,role:u.role,active:Boolean(u.active)})),
+      users:this.all('SELECT * FROM users').map(u=>({id:u.id,name:u.name,contact:u.contact,role:u.role,active:Boolean(u.active),deleted:Boolean(u.deleted)})),
       campaigns:this.all('SELECT * FROM campaigns').map(c=>({id:c.id,name:c.name,location:c.location,leaderId:c.leader_id,types:JSON.parse(c.types),status:c.status,color:'mint'})),
       memberships:this.all('SELECT * FROM memberships').map(m=>({id:m.id,campaignId:m.campaign_id,userId:m.user_id,role:m.role,parentId:m.parent_id,status:m.status,displayName:m.display_name})),
       records:this.all('SELECT * FROM records').map(r=>({...JSON.parse(r.manifest),status:r.status,number:r.number,receivedAt:r.received_at})),

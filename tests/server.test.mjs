@@ -260,3 +260,16 @@ test('Casa Cantera lone lona campaign rejects barda or espectacular after Sofia 
   for(const type of ['barda','espectacular'])forbidden(()=>f.service.createRecord(f.actor('f1'),{...input,type}),400);
   assert.equal(f.service.createRecord(f.actor('f1'),input).status,'uploading');f.close();
 });
+
+test('definitive user deletion retains encrypted evidence and remains read-only after restart',()=>{
+  const f=fixture(),bytes=Buffer.from([255,216,255,224,1,2,3,4]),m=manifest();
+  f.service.createRecord(f.actor('f1'),m);f.service.uploadChunk(f.actor('f1'),m.id,m.media[0].id,0,bytes);f.service.finalize(f.actor('f1'),m.id);
+  forbidden(()=>f.service.deleteMember(f.actor('c2'),'m4'),404);forbidden(()=>f.service.deleteMember(f.actor('l1'),'m4'),404);
+  forbidden(()=>f.service.deleteMember(f.actor('a1'),'m1'),409);forbidden(()=>f.service.deleteMember(f.actor('a1'),'m2'),409);
+  f.service.deleteMember(f.actor('c1'),'m4');f.reopen();
+  assert.equal(f.service.data().memberships.find(x=>x.id==='m4').status,'deleted');
+  const r=f.service.bootstrap(f.actor('l1')).records.find(r=>r.id===m.id);assert.equal(r.author.name,'Sofía López');assert.equal(r.status,'synced');
+  assert.equal(f.service.media(f.actor('l1'),m.id,m.media[0].id).bytes.length,bytes.length);
+  forbidden(()=>f.service.updateMember(f.actor('c1'),'m4',{name:'Reactivate',status:'active'}),404);
+  forbidden(()=>f.service.createRecord(f.actor('f1'),manifest()),403);f.close();
+});

@@ -1,5 +1,5 @@
 import {createHash,randomBytes,randomInt,randomUUID,timingSafeEqual} from 'node:crypto';
-import {seedData,scopedMemberships,visibleCampaigns,canManageMember,visibleRecords,validateCampaign,manualAssignment,transferTarget,TYPE_NAMES,finalFilename} from '../src/domain.mjs';
+import {seedData,scopedMemberships,visibleCampaigns,canManageMember,visibleRecords,validateCampaign,manualAssignment,transferTarget,assertDeletable,TYPE_NAMES,finalFilename} from '../src/domain.mjs';
 import {CHUNK_BYTES} from './files.mjs';
 export class ApiError extends Error {constructor(status,message){super(message);this.status=status;}}
 export const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -95,6 +95,19 @@ export class Service {
       if(actor.role==='admin')this.store.run('UPDATE users SET name=? WHERE id=?',name,m.userId);this.audit(actor,'Actualizó pertenencia',id,m.campaignId);});
     return this.member(actor,id);
   }
+  deleteMember(actor,id){
+    const m=this.member(actor,id,true);
+    try{assertDeletable(this.data(),actor,m);}catch(error){throw new ApiError(409,error.message);}
+    this.store.transaction(()=>{this.store.run("UPDATE memberships SET status='deleted' WHERE id=?",id);this.store.run("UPDATE invitations SET status='revoked' WHERE membership_id=? AND status='pending'",id);this.audit(actor,'Eliminó usuario; conserva evidencias',id,m.campaignId);});
+    return {id,status:'deleted'};
+  }
+  deleteGlobalUser(actor,id){
+    if(actor.role!=='admin')throw new ApiError(403,'Solo el administrador puede eliminar cuentas sin campaña.');
+    const u=this.store.get("SELECT * FROM users WHERE id=? AND role='leader' AND deleted=0",id);
+    if(!u||this.store.get('SELECT id FROM memberships WHERE user_id=?',id))throw new ApiError(409,'La cuenta tiene campañas asignadas o no está disponible.');
+    this.store.transaction(()=>{this.store.run('UPDATE users SET active=0,deleted=1 WHERE id=?',id);this.store.run('DELETE FROM sessions WHERE user_id=?',id);this.store.run("UPDATE invitations SET status='revoked' WHERE user_id=? AND status='pending'",id);this.audit(actor,'Eliminó cuenta sin campaña',id);});
+    return {id,status:'deleted'};
+  }
   createUser(actor,input){
     const name=text(input.name,80,'Nombre'),value=contact(input.contact);
     let assignment;try{assignment=manualAssignment(this.data(),actor,input);}catch(error){throw new ApiError(403,error.message);}
@@ -110,7 +123,7 @@ export class Service {
   }
   updateGlobalUser(actor,id,input){
     if(actor.role!=='admin')throw new ApiError(403,'Solo el administrador puede modificar cuentas sin campaña.');
-    const u=this.store.get("SELECT * FROM users WHERE id=? AND role='leader'",id);
+    const u=this.store.get("SELECT * FROM users WHERE id=? AND role='leader' AND deleted=0",id);
     if(!u||this.store.get('SELECT id FROM memberships WHERE user_id=?',id))throw new ApiError(404,'Cuenta sin campaña no disponible.');
     if(this.store.get("SELECT id FROM invitations WHERE user_id=? AND status='pending'",id))throw new ApiError(409,'Resuelve primero la invitación pendiente.');
     const name=text(input.name,80,'Nombre');if(!['active','inactive'].includes(input.status))throw new ApiError(400,'Estado inválido.');
@@ -147,7 +160,7 @@ export class Service {
     }
     const existing=this.store.get('SELECT * FROM users WHERE contact=?',value),userId=existing?.id||randomUUID(),memberId=role==='leader'?null:randomUUID(),id=randomUUID(),inviteToken=token();
     if(existing&&(existing.role!==role||!existing.active))throw new ApiError(409,'Este contacto ya tiene otro rol o está desactivado.');
-    if(memberId&&this.store.get("SELECT id FROM memberships WHERE campaign_id=? AND user_id=? AND status!='transferred'",campaignId,userId))throw new ApiError(409,'El usuario ya pertenece a esta campaña.');
+    if(memberId&&this.store.get("SELECT id FROM memberships WHERE campaign_id=? AND user_id=? AND status NOT IN ('transferred','deleted')",campaignId,userId))throw new ApiError(409,'El usuario ya pertenece a esta campaña.');
     if(this.store.get("SELECT id FROM invitations WHERE user_id=? AND role=? AND status='pending'",userId,role))throw new ApiError(409,'Ya existe una invitación pendiente para este usuario.');
     this.store.transaction(()=>{
       if(!existing)this.store.run('INSERT INTO users(id,name,contact,role) VALUES(?,?,?,?)',userId,name,value,role);
