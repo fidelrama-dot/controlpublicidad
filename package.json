@@ -1,13 +1,17 @@
 {
   "name": "controlpublicidad",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Prototipo navegable de ControlPublicidad, sin servicios de producción.",
+  "description": "Panel y API local de ControlPublicidad con permisos, persistencia y recepción de evidencias.",
   "scripts": {
     "build": "node build.mjs",
     "test": "node --test tests/*.test.mjs",
-    "start": "python3 -m http.server 4173 --bind 127.0.0.1"
+    "start": "node server/index.mjs --demo",
+    "preview": "python3 -m http.server 4174 --bind 127.0.0.1"
+  },
+  "engines": {
+    "node": ">=22.13.0"
   },
   "devDependencies": {
     "jsdom": "26.1.0"

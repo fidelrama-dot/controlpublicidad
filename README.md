@@ -3,9 +3,12 @@
 Sistema de evidencias fotográficas y videos con GPS para campañas de lonas, espectaculares y bardas.
 
 ## Estado
-Prototipo navegable de pantallas, adaptable a computadora y celular; todavía no es una aplicación instalable ni un servicio de producción.
-Incluye acceso de demostración, resumen, campañas, administración de usuarios, jerarquía de equipos, invitaciones de ejemplo, evidencias, mapa esquemático, captura simulada y estado de envíos.
-Pendientes: cliente móvil nativo, servidor, autenticación real, captura con cámara/GPS, almacenamiento cifrado, invitaciones válidas, sincronización real y cartografía interactiva.
+Versión 0.2: panel conectado a un servidor local de desarrollo, además del prototipo autónomo.
+El servidor guarda usuarios, campañas, pertenencias, invitaciones y sesiones en SQLite; aplica permisos por rama en cada operación.
+Las invitaciones tienen contacto verificado, caducidad y uso único. El acceso local usa códigos aleatorios de prueba con vencimiento y límite de intentos.
+La API recibe archivos por fragmentos reanudables, los cifra en el servidor y solo confirma el registro tras verificar todos sus hashes.
+Pendientes: app Android con cámara/GPS y bóveda cifrada offline, proveedores de correo/SMS, alojamiento en nube, cartografía real, QR, traslado de equipos y gestión global de cuentas.
+El panel conectado aún no captura archivos: muestra evidencias recibidas por la API. No es una APK ni un servicio de producción.
 
 ## Revisar las pantallas
 Abre `index.html` en un navegador. Es un archivo autónomo, sin recursos externos.
@@ -14,23 +17,41 @@ El selector superior permite explorar los cuatro roles y comparar dos equipos.
 Todas las fotografías y videos son ejemplos; no se abre la cámara ni se consultan coordenadas del teléfono.
 Crear campañas, editar usuarios, generar invitaciones y sellar/sincronizar registros afecta solo a la demo del navegador.
 Los borradores y cambios ficticios se guardan en localStorage sin cifrado. No introducir datos personales ni evidencias reales.
-Los permisos del prototipo son reglas de interfaz verificadas con pruebas; no sustituyen autorización en servidor.
+Al abrir el archivo autónomo los permisos son reglas de interfaz de demostración. Al iniciar el servidor se validan también en cada solicitud de la API.
 El esquema del mapa no representa cartografía real; sus puntos abren registros de ejemplo.
 Para reiniciar la demo, elimina el almacenamiento local del archivo/página en el navegador.
 
 ## Desarrollo
-Node.js 22 o superior y Python 3 para el servidor opcional.
+Node.js 22.13 o superior. Python 3 solo para la vista estática opcional.
 ```sh
 npm ci
 npm run build
 npm test
 npm start
 ```
-El servidor local escucha en http://127.0.0.1:4173.
-Fuentes: `src/domain.mjs`, `src/app.mjs`, `src/styles.css` y `src/shell.html`.
+El servidor local escucha en http://127.0.0.1:4173/?server=1.
+Usa `admin@example.invalid`, `mariana@example.invalid`, `diego@example.invalid` o `sofia@example.invalid`.
+El código aleatorio aparece en la pantalla de desarrollo; no se envían SMS ni correos reales.
+El panel conectado no tiene selector para suplantar usuarios: para probar otro rol cierra sesión y entra con su contacto.
+Fuentes del panel: `src/domain.mjs`, `src/api.mjs`, `src/app.mjs`, `src/styles.css` y `src/shell.html`.
+Servidor: `server/store.mjs`, `server/service.mjs`, `server/files.mjs`, `server/http.mjs` y `server/index.mjs`.
 `node build.mjs` genera el archivo autónomo `index.html`; no necesita dependencias instaladas.
-Las pruebas de dominio e interacción usan datos ficticios y JSDOM.
-Verificación inicial: 14 pruebas automatizadas aprobadas. Revisión visual en navegador pendiente: este entorno bloqueó la apertura de archivos locales y no tenía Chromium disponible.
+Las pruebas de dominio, servidor, cliente y pantallas conectadas usan datos ficticios, archivos temporales, HTTP real y JSDOM.
+Verificación: 27 pruebas automatizadas. Incluyen recuperación tras reinicio y corte de conexión, permisos de API, CSRF, invitaciones y sellado inmutable. Revisión visual en navegador pendiente.
+
+## Conservación en esta versión
+SQLite usa transacciones, WAL y sincronización completa. Los archivos recibidos se guardan por fragmentos con AES-256-GCM y escritura atómica.
+Los manifiestos quedan sellados desde la primera solicitud. No hay rutas para editar ni eliminar registros.
+El número de registro se asigna dentro de una transacción al confirmar todos los archivos; repetir la operación conserva el número.
+La base de datos, medios y clave de desarrollo se guardan en `server/.data/`, excluida de Git.
+Los metadatos del servidor no están cifrados en SQLite. Este almacenamiento no sustituye el cifrado de archivos y metadatos en el celular.
+La clave local de desarrollo vive junto al almacén, con permisos restringidos. La provisión de claves externas queda para el alojamiento.
+La aplicación móvil debe conservar su copia local después de cualquier error y hasta recibir confirmación íntegra. El cliente de subida no elimina sus archivos.
+La validación de tipo revisa la firma básica del formato; los hashes verifican integridad, sin probar por sí solos autenticidad de la captura.
+El arranque fuera del modo local está deshabilitado hasta configurar entrega real de códigos y alojamiento HTTPS.
+
+## Protocolo para la futura app móvil
+Consulta [docs/API.md](docs/API.md). Hay recepción de archivos y reanudación real en servidor; la cámara y la bóveda offline del teléfono siguen pendientes.
 
 ## Jerarquía y alcance
 - Administrador: único rol que crea campañas y asigna exactamente un líder por campaña; gestiona todos los usuarios y consulta todas las campañas.
@@ -152,5 +173,5 @@ Las tareas se mencionan en los permisos; su flujo y campos quedan por definir.
 - GPS sin permiso o impreciso: evidencia conservada y señalada.
 - Confirmación remota de todos los archivos antes de marcar sincronizado.
 
-## Pruebas del prototipo
-`npm test`: aislamiento entre ramas, creación de campañas, filtros por fecha/campaña/tipo, nombres de archivo, límites de captura, conservación del borrador, sellado y sincronización simulada.
+## Pruebas
+`npm test`: prototipo y panel conectado, permisos en servidor, persistencia, verificación de acceso, invitaciones de un solo uso, envíos reanudables, cifrado de fragmentos, integridad y bloqueo de cambios.
