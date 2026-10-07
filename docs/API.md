@@ -22,7 +22,7 @@ Los códigos nunca se exponen fuera del modo de desarrollo; el arranque de produ
 | Datos del panel | GET /api/bootstrap | Campañas, usuarios y registros autorizados |
 | Alta manual de usuario | POST /api/users | Administrador o superior directo; rol/parent fijados en servidor |
 | Editar líder sin campaña | PATCH /api/users/:id | Administrador; nombre y estado, sin invitación pendiente |
-| Mover colaborador | POST /api/memberships/:id/transfer | Solo administrador; coordinador activo de destino |
+| Mover coordinador/equipo o colaborador | POST /api/memberships/:id/transfer | Solo administrador; superior activo según el rol |
 | Crear campaña | POST /api/campaigns | Administrador |
 | Editar nombre por campaña/estado | PATCH /api/memberships/:id | Superior directo o administrador |
 | Crear invitación | POST /api/invitations | Rol inferior y rama propios |
@@ -43,9 +43,9 @@ El enlace del servidor local aún no es accesible desde teléfonos de otras pers
 
 `PATCH /api/memberships/:id`: nombre visible y estado activo/inactivo. La baja es por campaña, no borra evidencias. No se desactiva el líder de campaña ni un superior con personas activas. Las asignaciones históricas trasladadas no se reactivan ni editan.
 
-`POST /api/memberships/:id/transfer` con `{"parentId":"ID del coordinador de destino"}`. Solo el administrador traslada colaboradores activos/inactivos. El destino debe ser un coordinador activo bajo un líder activo; se rechazan el mismo equipo y pertenencias duplicadas de destino.
+`POST /api/memberships/:id/transfer` con `{"parentId":"ID del coordinador de destino"}`. Solo el administrador traslada coordinadores o colaboradores activos/inactivos. Para colaboradores, el destino es un coordinador activo bajo un líder activo; para coordinadores, es el líder activo de la campaña de destino. Al trasladar un coordinador también se trasladan sus colaboradores actuales, en una misma transacción. Las invitaciones pendientes del equipo, el mismo superior o una persona ya asignada a la campaña de destino bloquean toda la operación.
 
-La operación es atómica y crea otra pertenencia, conservando el estado activo/inactivo. La anterior pasa a `transferred`, sin cambiar campaña, superior ni registros originales. La rama de origen mantiene acceso a sus evidencias históricas; el destino recibe únicamente nuevas capturas. El autor puede terminar una subida ya sellada antes del traslado. Nuevos manifiestos no se aceptan en una asignación trasladada. Los borradores aún exclusivos del teléfono deben finalizarse y enviarse antes de mover a la persona; su recuperación offline requiere la futura app Android.
+La operación es atómica y crea otra pertenencia por persona, conservando el estado activo/inactivo y los vínculos de su equipo. La anterior pasa a `transferred`, sin cambiar campaña, superior ni registros originales. La rama de origen mantiene acceso a sus evidencias históricas; el destino recibe únicamente nuevas capturas. El autor puede terminar una subida ya sellada antes del traslado. Nuevos manifiestos no se aceptan en una asignación trasladada. Los borradores aún exclusivos del teléfono deben finalizarse y enviarse antes de mover a la persona; su recuperación offline requiere la futura app Android.
 
 SQLite migra automáticamente la restricción original para permitir pertenencias históricas y una única pertenencia actual por campaña/usuario, manteniendo las claves foráneas.
 

@@ -59,7 +59,7 @@ test('connected screen signs in, creates campaigns and invitations, and saves sc
     await waitFor(()=>!d.querySelector('#modal[open]'),'manual create');
     const manualUser=f.store.get('SELECT id FROM users WHERE contact=?','manual-ui@example.invalid');
     const manualMember=f.store.get('SELECT id FROM memberships WHERE user_id=?',manualUser.id);
-    click('.tree [data-action="user-detail"][data-id="'+manualMember.id+'"]');click('[data-action="move-user"]');change('#move-parent','m8');submit('#move-user-form');
+    click('.tree [data-action="user-detail"][data-id="'+manualMember.id+'"]');click('[data-action="move-user"]');change('#move-campaign','p2');change('#move-parent','m8');submit('#move-user-form');
     await waitFor(()=>!d.querySelector('#modal[open]'),'manual transfer');
     assert.equal(f.store.get('SELECT status FROM memberships WHERE id=?',manualMember.id).status,'transferred');
     assert.equal(f.store.get("SELECT parent_id FROM memberships WHERE user_id=? AND status='active'",manualUser.id).parent_id,'m8');
@@ -74,8 +74,10 @@ test('connected screen signs in, creates campaigns and invitations, and saves sc
     click('[data-action="logout"]');await waitFor(()=>d.querySelector('#login-contact'),'logout');
     await login('diego@example.invalid');click('[data-nav="users"]');
     assert.equal(d.querySelectorAll('tbody tr').length,3);assert.doesNotMatch(q('tbody').textContent,/Valeria Cruz/);
-    click('[data-action="edit-user"][data-id="m4"]');q('#edit-name').value='Sofía del equipo';submit('#edit-user-form');
-    await waitFor(()=>!d.querySelector('#modal[open]'),'edit saved');
+    click('.tree [data-action="user-detail"][data-id="m4"]');click('[data-action="edit-profile-name"]');q('#profile-name-input').value='Sofía del equipo';submit('#profile-name-form');
+    await waitFor(()=>d.querySelector('#profile-name-slot')?.textContent.includes('Sofía del equipo'),'inline edit saved');
+    click('[data-action="toggle-user-status"]');await waitFor(()=>d.querySelector('[data-action="toggle-user-status"]')?.textContent==='Inactivo','inline deactivated');
+    click('[data-action="toggle-user-status"]');await waitFor(()=>d.querySelector('[data-action="toggle-user-status"]')?.textContent==='Activo','inline activated');
     assert.match(q('tbody').textContent,/Sofía del equipo/);
     assert.equal(f.store.get('SELECT display_name FROM memberships WHERE id=?','m4').display_name,'Sofía del equipo');
     assert.equal(f.store.get('SELECT name FROM users WHERE id=?','f1').name,'Sofía López');

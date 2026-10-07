@@ -119,13 +119,17 @@ export class Service {
   }
   transferMember(actor,id,input){
     let valid;try{valid=transferTarget(this.data(),actor,id,input.parentId);}catch(error){throw new ApiError(actor.role==='admin'?409:403,error.message);}
-    const {source,parent}=valid,newId=randomUUID();
+    const {source,parent,branch}=valid,mapping=new Map(branch.map(m=>[m.id,randomUUID()])),newId=mapping.get(source.id);
     this.store.transaction(()=>{
-      this.store.run("UPDATE memberships SET status='transferred' WHERE id=?",source.id);
-      this.store.run('INSERT INTO memberships(id,campaign_id,user_id,role,parent_id,status,display_name) VALUES(?,?,?,?,?,?,?)',newId,parent.campaignId,source.userId,'collaborator',parent.id,source.status,source.displayName);
-      this.audit(actor,'Trasladó colaborador de '+source.id+' a '+newId,newId,parent.campaignId);
+      for(const m of branch)this.store.run("UPDATE memberships SET status='transferred' WHERE id=?",m.id);
+      // Insert the coordinator before its collaborators to preserve parent constraints.
+      for(const m of [source,...branch.filter(m=>m.id!==source.id)]){
+        const id=mapping.get(m.id),parentId=m.id===source.id?parent.id:mapping.get(m.parentId);
+        this.store.run('INSERT INTO memberships(id,campaign_id,user_id,role,parent_id,status,display_name) VALUES(?,?,?,?,?,?,?)',id,parent.campaignId,m.userId,m.role,parentId,m.status,m.displayName);
+        this.audit(actor,'Trasladó '+m.id+' a '+id,id,parent.campaignId);
+      }
     });
-    return {membershipId:newId,previousMembershipId:source.id,campaignId:parent.campaignId,parentId:parent.id};
+    return {membershipId:newId,previousMembershipId:source.id,campaignId:parent.campaignId,parentId:parent.id,moved:branch.length};
   }
   invite(actor,input,origin){
     if(actor.role==='collaborator')throw new ApiError(403,'Tu rol no permite invitar usuarios.');

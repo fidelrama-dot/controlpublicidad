@@ -230,3 +230,33 @@ test('manual reactivation requires an active direct superior',()=>{
   f.service.updateMember(f.actor('l1'),'m2',{name:'Diego',status:'active'});
   assert.equal(f.service.updateMember(f.actor('c1'),'m4',{name:'Sofía',status:'active'}).status,'active');f.close();
 });
+test('coordinator and collaborators move atomically to another leader without moving original records',()=>{
+  const f=fixture(),input=manifest('m9'),bytes=Buffer.from([255,216,255,224,1,2,3,4]);
+  f.service.createRecord(f.actor('f4'),input);f.service.uploadChunk(f.actor('f4'),input.id,input.media[0].id,0,bytes);f.service.finalize(f.actor('f4'),input.id);
+  const original=JSON.stringify(f.service.data().records[0]);
+  const moved=f.service.transferMember(f.actor('a1'),'m8',{parentId:'m1'});assert.equal(moved.moved,2);
+  const d=f.service.data(),c=d.memberships.find(m=>m.id===moved.membershipId),child=d.memberships.find(m=>m.userId==='f4'&&m.status==='active');
+  assert.equal(c.role,'coordinator');assert.equal(c.parentId,'m1');assert.equal(child.parentId,c.id);assert.equal(child.campaignId,'p1');
+  assert.equal(d.memberships.find(m=>m.id==='m8').status,'transferred');assert.equal(d.memberships.find(m=>m.id==='m9').status,'transferred');
+  assert.equal(JSON.stringify(d.records[0]),original);assert.equal(f.service.bootstrap(f.actor('l2')).records.length,1);assert.equal(f.service.bootstrap(f.actor('l1')).records.length,0);
+  forbidden(()=>f.service.updateMember(f.actor('l2'),c.id,{name:'Ataque',status:'active'}),404);
+  f.service.updateMember(f.actor('l1'),c.id,{name:'Pablo nuevo equipo',status:'active'});
+  assert.deepEqual(f.store.all('PRAGMA foreign_key_check'),[]);f.reopen();assert.equal(f.service.data().memberships.find(m=>m.id===child.id).parentId,c.id);f.close();
+});
+test('coordinator transfer rejects duplicate destination users and pending source invitations without partial changes',()=>{
+  let f=fixture();
+  f.service.invite(f.actor('a1'),{name:'Carlos',contact:'carlos@example.invalid',role:'collaborator',campaignId:'p1',parentId:'m2'},'http://localhost');
+  forbidden(()=>f.service.transferMember(f.actor('a1'),'m8',{parentId:'m1'}),409);
+  assert.equal(f.service.data().memberships.find(m=>m.id==='m8').status,'active');assert.equal(f.service.data().memberships.find(m=>m.id==='m9').status,'active');f.close();
+  f=fixture();f.service.invite(f.actor('c3'),{name:'Pendiente',contact:'pending-team@example.invalid',campaignId:'p2'},'http://localhost');
+  forbidden(()=>f.service.transferMember(f.actor('a1'),'m8',{parentId:'m1'}),409);
+  assert.equal(f.service.data().memberships.find(m=>m.id==='m8').status,'active');f.close();
+});
+test('Casa Cantera lone lona campaign rejects barda or espectacular after Sofia transfer',()=>{
+  const f=fixture(),c=f.service.createCampaign(f.actor('a1'),{name:'Casa Cantera',location:'Morelia',leaderId:'l2',types:['lona']});
+  const leader=f.service.data().memberships.find(m=>m.campaignId===c.id&&m.role==='leader');
+  const coord=f.service.createUser(f.actor('a1'),{name:'Coordinador Casa Cantera',contact:'cc-coord@example.invalid',role:'coordinator',campaignId:c.id,parentId:leader.id});
+  const moved=f.service.transferMember(f.actor('a1'),'m4',{parentId:coord.membershipId}),input=manifest(moved.membershipId);
+  for(const type of ['barda','espectacular'])forbidden(()=>f.service.createRecord(f.actor('f1'),{...input,type}),400);
+  assert.equal(f.service.createRecord(f.actor('f1'),input).status,'uploading');f.close();
+});

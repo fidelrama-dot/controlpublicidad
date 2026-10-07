@@ -8,7 +8,9 @@ Vista privada: https://controlpublicidad-pruebas.fidelrama.chatgpt.site
 4. En el selector superior elegir Administrador, Líder, Coordinador o Colaborador para comparar los permisos.
 5. Abrir Usuarios y equipos: tocar las flechas para desplegar ramas y el nombre de una persona para consultar su ficha.
 6. La tabla completa aparece al desplegar la opción situada debajo del árbol.
-7. Alta manual permite crear usuarios ficticios. Modificar, dar de baja y reactivar se realizan desde su ficha. El administrador también puede mover colaboradores a otro coordinador, mostrando campaña y líder de destino.
+7. Alta manual permite crear usuarios ficticios. En su ficha, tocar o mantener presionado el nombre permite editarlo, y tocar Activo/Inactivo cambia el estado. El coordinador también puede editar a sus colaboradores directos. Cambiar, con flecha junto al estado, permite al administrador seleccionar otra campaña y el superior correspondiente: coordinador para colaboradores o líder para coordinadores. Al mover un coordinador también se mueve su equipo.
+
+La captura solo muestra los tipos habilitados de la campaña seleccionada; por ejemplo, una campaña configurada únicamente como lona no ofrece barda ni espectacular. Los borradores vacíos se ajustan a la campaña actual sin perder notas.
 
 Los diez usuarios de prueba originales siguen disponibles. La vista es adaptable a celular y computadora.
 

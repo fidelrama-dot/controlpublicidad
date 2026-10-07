@@ -93,13 +93,25 @@ export function manualAssignment(data,actor,input) {
   return {role,campaignId:parent.campaignId,parentId:parent.id};
 }
 export function transferTarget(data,actor,memberId,parentId) {
-  if(actor.role!=='admin')throw Error('Solo el administrador puede mover colaboradores entre equipos.');
+  if(actor.role!=='admin')throw Error('Solo el administrador puede trasladar personas entre equipos.');
   const source=data.memberships.find(m=>m.id===memberId),parent=data.memberships.find(m=>m.id===parentId);
-  if(!source||source.role!=='collaborator'||!['active','inactive'].includes(source.status))throw Error('Selecciona un colaborador activo o inactivo.');
-  if(!parent||parent.role!=='coordinator'||parent.status!=='active'||!data.memberships.some(m=>m.id===parent.parentId&&m.role==='leader'&&m.status==='active')||!data.campaigns.some(c=>c.id===parent.campaignId&&c.status==='active'))throw Error('Selecciona un coordinador activo de destino.');
-  if(source.parentId===parent.id)throw Error('El colaborador ya pertenece a este equipo.');
-  if(data.memberships.some(m=>m.id!==source.id&&m.userId===source.userId&&m.campaignId===parent.campaignId&&m.status!=='transferred'))throw Error('El colaborador ya pertenece a la campaña de destino.');
-  return {source,parent};
+  if(!source||!['coordinator','collaborator'].includes(source.role)||!['active','inactive'].includes(source.status))throw Error('Selecciona un coordinador o colaborador activo o inactivo.');
+  const expected=source.role==='coordinator'?'leader':'coordinator';
+  if(!parent||parent.role!==expected||parent.status!=='active'||parent.role==='coordinator'&&!data.memberships.some(m=>m.id===parent.parentId&&m.role==='leader'&&m.status==='active')||!data.campaigns.some(c=>c.id===parent.campaignId&&c.status==='active'))throw Error('Selecciona un '+ROLE_NAMES[expected].toLowerCase()+' activo de destino.');
+  if(source.parentId===parent.id)throw Error('La persona ya pertenece a este equipo.');
+  const scope=descendants(data,source.id),branch=data.memberships.filter(m=>scope.has(m.id)&&m.status!=='transferred');
+  if(branch.some(m=>m.status==='invited'))throw Error('Resuelve las invitaciones pendientes del equipo antes de trasladarlo.');
+  if(branch.some(m=>data.memberships.some(x=>!scope.has(x.id)&&x.userId===m.userId&&x.campaignId===parent.campaignId&&x.status!=='transferred')))throw Error('Una persona del equipo ya pertenece a la campaña de destino.');
+  return {source,parent,branch};
+}
+export function captureCampaigns(data,actor){
+  if(actor.role!=='collaborator')return [];
+  return data.campaigns.filter(c=>c.status==='active'&&data.memberships.some(m=>{
+    if(m.userId!==actor.id||m.role!=='collaborator'||m.campaignId!==c.id||m.status!=='active')return false;
+    let ancestor=m;const seen=new Set();
+    while(ancestor.parentId){if(seen.has(ancestor.id))return false;seen.add(ancestor.id);ancestor=data.memberships.find(p=>p.id===ancestor.parentId);if(!ancestor||ancestor.status!=='active'||ancestor.campaignId!==c.id)return false;}
+    return ancestor.role==='leader';
+  }));
 }
 export function dateInMexico(iso) {
   const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/Mexico_City',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(iso));
@@ -118,7 +130,7 @@ export function validateCampaign(actor,input,data) {
 }
 export function assertCapture(data,actor,campaignId,type,media) {
   const member=data.memberships.find(m=>m.userId===actor.id&&m.campaignId===campaignId&&m.role==='collaborator'&&m.status==='active');
-  if(!member || actor.role!=='collaborator') throw Error('La captura está disponible para colaboradores asignados.');
+  if(!member || !captureCampaigns(data,actor).some(c=>c.id===campaignId)) throw Error('La captura está disponible para colaboradores asignados a una campaña activa.');
   const c=data.campaigns.find(c=>c.id===campaignId);
   if(!c?.types.includes(type)) throw Error('Elige un tipo permitido por la campaña.');
   if(media.some(m=>!['photo','video'].includes(m.kind))) throw Error('Tipo de evidencia inválido.');

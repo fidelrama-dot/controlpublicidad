@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {JSDOM,VirtualConsole} from 'jsdom';
+import {seedData} from '../src/domain.mjs';
 const html=(await readFile(new URL('../index.html',import.meta.url),'utf8')).replace('<script type="module">','<script>');
 function createApp(saved){
   const errors=[],console=new VirtualConsole();
@@ -117,16 +118,16 @@ test('manual creation, profile deactivation and reactivation preserve sample use
   const saved=JSON.parse(a.dom.window.localStorage.getItem('controlpublicidad-screens-v1')).data;
   const u=saved.users.find(u=>u.contact==='nuevo@example.invalid'),m=saved.memberships.find(m=>m.userId===u.id);
   assert.equal(m.parentId,'m2');assert.equal(saved.users.length,11);
-  a.click('.tree [data-action="user-detail"][data-id="'+m.id+'"]');a.click('[data-action="deactivate-user"]');a.submit('#edit-user-form');
-  a.click('.tree [data-action="user-detail"][data-id="'+m.id+'"]');a.click('#modal [data-action="edit-user"]');
-  a.change('#edit-status','active');a.input('#edit-name','Nombre modificado');a.submit('#edit-user-form');
+  a.click('.tree [data-action="user-detail"][data-id="'+m.id+'"]');a.click('[data-action="toggle-user-status"]');
+  a.click('.tree [data-action="user-detail"][data-id="'+m.id+'"]');a.click('[data-action="toggle-user-status"]');a.click('[data-action="edit-profile-name"]');
+  a.input('#profile-name-input','Nombre modificado');a.submit('#profile-name-form');
   assert.match(a.q('.tree').textContent,/Nombre modificado/);
   assert.match(a.q('.tree').textContent,/Sofía López|Mariana Torres/);
   assert.deepEqual(a.errors,[]);a.close();
 });
 test('admin moves collaborator to another leader without relocating historical evidence',()=>{
   const a=createApp();a.login();a.click('[data-nav="users"]');a.click('.tree [data-action="user-detail"][data-id="m4"]');
-  a.click('[data-action="move-user"]');a.change('#move-parent','m8');a.submit('#move-user-form');
+  a.click('[data-action="move-user"]');a.change('#move-campaign','p2');a.change('#move-parent','m8');a.submit('#move-user-form');
   const saved=JSON.parse(a.dom.window.localStorage.getItem('controlpublicidad-screens-v1')).data;
   const old=saved.memberships.find(m=>m.id==='m4'),next=saved.memberships.find(m=>m.userId==='f1'&&m.status==='active');
   assert.equal(old.status,'transferred');assert.equal(old.parentId,'m2');assert.equal(next.parentId,'m8');assert.equal(next.campaignId,'p2');
@@ -135,5 +136,73 @@ test('admin moves collaborator to another leader without relocating historical e
   assert.match(a.q('.tree').textContent,/Sofía López/);
   a.click('.tree [data-action="user-detail"][data-id="'+next.id+'"]');
   assert.equal(a.q('[data-total="records"]').textContent,'0');assert.equal(a.document.querySelectorAll('#modal [data-action="move-user"]').length,0);
+  assert.deepEqual(a.errors,[]);a.close();
+});
+test('coordinator edits own collaborator directly by name and status, with no modify button in profile',()=>{
+  const a=createApp();a.login();a.change('#demo-role','c1');a.click('[data-nav="users"]');
+  a.click('.tree [data-action="user-detail"][data-id="m4"]');
+  assert.equal(a.document.querySelectorAll('#modal [data-action="edit-user"]').length,0);
+  assert.equal(a.document.querySelectorAll('#modal [data-action="deactivate-user"]').length,0);
+  assert.equal(a.document.querySelectorAll('#modal [data-action="move-user"]').length,0);
+  a.click('[data-action="edit-profile-name"]');a.input('#profile-name-input','Sofía del equipo');a.submit('#profile-name-form');
+  assert.match(a.q('#profile-name-slot').textContent,/Sofía del equipo/);
+  a.click('[data-action="toggle-user-status"]');assert.equal(a.q('[data-action="toggle-user-status"]').textContent,'Inactivo');
+  a.click('[data-action="toggle-user-status"]');assert.equal(a.q('[data-action="toggle-user-status"]').textContent,'Activo');
+  const saved=JSON.parse(a.dom.window.localStorage.getItem('controlpublicidad-screens-v1')).data;
+  assert.equal(saved.users.find(u=>u.id==='f1').name,'Sofía López');assert.equal(saved.memberships.find(m=>m.id==='m4').displayName,'Sofía del equipo');
+  assert.deepEqual(a.errors,[]);a.close();
+});
+test('holding name opens editing and a cancelled pointer gesture does not',async()=>{
+  const a=createApp();a.login();a.click('[data-nav="users"]');a.click('.tree [data-action="user-detail"][data-id="m4"]');
+  const down=()=>{const event=new a.dom.window.Event('pointerdown',{bubbles:true});Object.assign(event,{button:0,clientX:10,clientY:10});a.q('[data-action="edit-profile-name"]').dispatchEvent(event);};
+  down();await new Promise(r=>setTimeout(r,580));assert.ok(a.document.querySelector('#profile-name-input'));
+  a.click('[data-action="cancel-profile-name"]');down();a.document.dispatchEvent(new a.dom.window.Event('pointercancel',{bubbles:true}));
+  await new Promise(r=>setTimeout(r,580));assert.equal(a.document.querySelector('#profile-name-form'),null);
+  assert.deepEqual(a.errors,[]);a.close();
+});
+function movedSofiaDraft(media=[]){
+  const d=seedData();d.campaigns.push({id:'cc',name:'Casa Cantera',location:'Morelia',leaderId:'l2',types:['lona'],status:'active',color:'mint'});
+  d.memberships.push({id:'cc-leader',campaignId:'cc',userId:'l2',role:'leader',parentId:null,status:'active'},{id:'cc-coordinator',campaignId:'cc',userId:'c3',role:'coordinator',parentId:'cc-leader',status:'active'});
+  d.memberships.find(m=>m.id==='m4').status='transferred';d.memberships.push({id:'cc-sofia',campaignId:'cc',userId:'f1',role:'collaborator',parentId:'cc-coordinator',status:'active'});
+  d.drafts={f1:{id:'old-draft',campaignId:'p1',type:'barda',notes:'Conservar esta nota',media,status:'draft',capturedAt:null}};
+  return JSON.stringify({version:1,data:d});
+}
+test('Sofia stale empty draft follows Casa Cantera and offers only lona, preserving notes',()=>{
+  const a=createApp(movedSofiaDraft());a.login();a.change('#demo-role','f1');
+  assert.equal(a.q('#capture-campaign').value,'cc');assert.equal(a.q('#capture-campaign').selectedOptions[0].textContent,'Casa Cantera');
+  assert.deepEqual([...a.document.querySelectorAll('[name="capture-type"]')].map(el=>el.value),['lona']);
+  assert.ok(a.q('[name="capture-type"]').checked);assert.equal(a.q('#capture-notes').value,'Conservar esta nota');
+  const injected=a.document.createElement('input');injected.name='capture-type';injected.value='espectacular';a.q('.type-choice').append(injected);
+  injected.dispatchEvent(new a.dom.window.Event('change',{bubbles:true}));
+  assert.deepEqual([...a.document.querySelectorAll('[name="capture-type"]')].map(el=>el.value),['lona']);
+  a.click('[data-action="add-media"][data-kind="photo"]');a.click('[data-action="seal-record"]');
+  const saved=JSON.parse(a.dom.window.localStorage.getItem('controlpublicidad-screens-v1')).data;
+  const r=saved.records.find(r=>r.id==='old-draft');assert.equal(r.campaignId,'cc');assert.equal(r.type,'lona');assert.equal(r.notes,'Conservar esta nota');
+  assert.deepEqual(a.errors,[]);a.close();
+});
+test('a stale draft with evidence is retained and never reassigned automatically',()=>{
+  const a=createApp(movedSofiaDraft([{kind:'photo',seq:1,capturedAt:'2026-10-07T12:00:00Z'}]));a.login();a.change('#demo-role','f1');
+  assert.match(a.q('.empty').textContent,/Borrador conservado/);
+  assert.equal(a.document.querySelector('[data-action="seal-record"]'),null);
+  const d=JSON.parse(a.dom.window.localStorage.getItem('controlpublicidad-screens-v1')).data.drafts.f1;
+  assert.equal(d.campaignId,'p1');assert.equal(d.media.length,1);assert.equal(d.notes,'Conservar esta nota');
+  assert.deepEqual(a.errors,[]);a.close();
+});
+test('coordinator migration selects a campaign and leader and moves its collaborators with it',()=>{
+  const a=createApp();a.login();a.click('[data-nav="users"]');a.click('.tree [data-action="user-detail"][data-id="m8"]');
+  a.click('[data-action="move-user"]');a.change('#move-campaign','p1');
+  assert.match(a.q('[for="move-parent"]').textContent,/Líder/);assert.equal(a.document.querySelector('#move-leader'),null);
+  a.change('#move-parent','m1');a.submit('#move-user-form');
+  const d=JSON.parse(a.dom.window.localStorage.getItem('controlpublicidad-screens-v1')).data,c=d.memberships.find(m=>m.userId==='c3'&&m.status==='active'),child=d.memberships.find(m=>m.userId==='f4'&&m.status==='active');
+  assert.equal(c.campaignId,'p1');assert.equal(c.parentId,'m1');assert.equal(child.parentId,c.id);assert.equal(child.campaignId,'p1');
+  assert.ok(d.records.filter(r=>r.membershipId==='m9').every(r=>r.campaignId==='p2'));
+  assert.deepEqual(a.errors,[]);a.close();
+});
+test('profile controls enforce consultation scope and prevent disabling a coordinator with active children',async()=>{
+  const a=createApp();a.login();a.click('[data-nav="users"]');a.click('.tree [data-action="user-detail"][data-id="m8"]');
+  a.click('[data-action="toggle-user-status"]');await new Promise(r=>setTimeout(r,0));assert.match(a.q('#profile-error').textContent,/personas activas/);
+  assert.equal(a.q('[data-action="toggle-user-status"]').textContent,'Activo');
+  a.click('[data-action="close-dialog"]');a.change('#demo-role','l1');a.click('[data-nav="users"]');a.click('.tree [data-action="user-detail"][data-id="m4"]');
+  assert.equal(a.document.querySelector('#modal [data-action="edit-profile-name"]'),null);assert.equal(a.document.querySelector('#modal [data-action="toggle-user-status"]'),null);
   assert.deepEqual(a.errors,[]);a.close();
 });

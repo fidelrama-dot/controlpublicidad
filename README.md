@@ -3,7 +3,7 @@
 Sistema de evidencias fotográficas y videos con GPS para campañas de lonas, espectaculares y bardas.
 
 ## Estado
-Versión 0.3: panel conectado a un servidor local de desarrollo, además del prototipo autónomo.
+Versión 0.4: panel conectado a un servidor local de desarrollo, además del prototipo autónomo.
 El servidor guarda usuarios, campañas, pertenencias, invitaciones y sesiones en SQLite; aplica permisos por rama en cada operación.
 Las invitaciones tienen contacto verificado, caducidad y uso único. El acceso local usa códigos aleatorios de prueba con vencimiento y límite de intentos.
 La API recibe archivos por fragmentos reanudables, los cifra en el servidor y solo confirma el registro tras verificar todos sus hashes.
@@ -41,7 +41,7 @@ Fuentes del panel: `src/domain.mjs`, `src/api.mjs`, `src/app.mjs`, `src/styles.c
 Servidor: `server/store.mjs`, `server/service.mjs`, `server/files.mjs`, `server/http.mjs` y `server/index.mjs`.
 `node build.mjs` genera el archivo autónomo `index.html`; no necesita dependencias instaladas.
 Las pruebas de dominio, servidor, cliente y pantallas conectadas usan datos ficticios, archivos temporales, HTTP real y JSDOM.
-Verificación: 37 pruebas automatizadas. Incluyen recuperación tras reinicio y corte de conexión, permisos de API, CSRF, invitaciones y sellado inmutable. Revisión visual en navegador pendiente.
+Verificación: 46 pruebas automatizadas. Incluyen recuperación tras reinicio y corte de conexión, permisos de API, CSRF, invitaciones y sellado inmutable. Revisión visual en navegador pendiente.
 
 ## Conservación en esta versión
 SQLite usa transacciones, WAL y sincronización completa. Los archivos recibidos se guardan por fragmentos con AES-256-GCM y escritura atómica.
@@ -83,8 +83,8 @@ Funciones:
 - Tabla completa oculta inicialmente, desplegable debajo del árbol; búsqueda por nombre, correo o celular y filtros por campaña, rol y estado.
 - Ficha emergente con registros propios y totales de registros, fotos, videos y personas activas de su rama en esa campaña.
 - Alta manual con nombre, correo/celular y asignación activa; el servidor fija el rol y superior para líderes/coordinadores. El acceso posterior requiere verificar el contacto.
-- Modificación del nombre visible y estado, sin elevar roles ni alterar otras ramas.
-- Traslado de colaboradores por el administrador a un coordinador de destino; se seleccionan campaña, líder y coordinador. La asignación anterior pasa a historial y conserva sus evidencias; la nueva asignación recibe futuras capturas. Los traslados dentro de la misma campaña también conservan la rama histórica.
+- Ficha sin botón Modificar: tocar o mantener presionado el nombre abre la edición; tocar Activo/Inactivo alterna el estado. El coordinador puede editar sus colaboradores directos, sin elevar roles ni alterar otras ramas.
+- Opción Cambiar con flecha junto al estado: el administrador traslada colaboradores a un coordinador o coordinadores con su equipo a un líder de otra campaña. Se elige campaña y superior según el rol. Las asignaciones anteriores pasan a historial y conservan las evidencias; las nuevas reciben futuras capturas. Las invitaciones pendientes y pertenencias duplicadas de destino bloquean el traslado completo.
 - Líderes dados de alta sin campaña pueden modificarse y desactivarse; no se puede desactivar el líder asignado a una campaña.
 - Alta mediante invitación QR, correo o WhatsApp, con campaña, rol y superior fijados por servidor.
 - Estado de invitación pendiente, aceptada, vencida o revocada; compartir nuevamente, renovar o cancelar.
@@ -112,6 +112,7 @@ Nombre, líder, ubicación (descripción y coordenadas/área), tipos habilitados
 Un tipo implica campaña simple; dos o tres implican mixta.
 Cada registro tiene exactamente un tipo permitido por la campaña.
 La selección de ubicación no limita automáticamente dónde se puede capturar.
+La pantalla de captura lista solo campañas activas asignadas y sus tipos habilitados. Un borrador vacío se ajusta a la asignación actual después de un traslado, conservando las notas; un borrador con evidencias no se reasigna ni se borra automáticamente.
 
 ## Acceso e invitaciones
 Autenticación por código de verificación al correo o celular; la primera verificación requiere internet.
