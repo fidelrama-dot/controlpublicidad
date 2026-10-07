@@ -16,6 +16,40 @@ Pendientes: cliente móvil, servidor, autenticación, almacenamiento cifrado, si
 - Los permisos se validan en servidor para cada operación, no solamente ocultando botones.
 - Las bajas son desactivaciones: conservan autoría e historial. Los traslados requieren una operación administrativa auditada.
 
+## Módulo de administración de usuarios (primera versión)
+Disponible en el panel web y con interfaz adaptable a celular.
+Cada rol ve únicamente los usuarios autorizados por su alcance.
+
+| Rol | Usuarios que puede administrar | Equipo que puede consultar |
+| --- | --- | --- |
+| Administrador | Todos; asigna el líder de cada campaña | Todos |
+| Líder | Sus coordinadores de campaña | Sus coordinadores y colaboradores descendientes |
+| Coordinador | Sus colaboradores directos de campaña | Sus colaboradores directos |
+| Colaborador | Ninguno | Sin acceso al módulo de usuarios |
+
+Funciones:
+- Listado y búsqueda por nombre, correo o celular; filtros por campaña, rol y estado.
+- Alta mediante invitación QR, correo o WhatsApp, con campaña, rol y superior fijados por servidor.
+- Estado de invitación pendiente, aceptada, vencida o revocada; compartir nuevamente, renovar o cancelar.
+- Ficha con nombre, correo/celular verificados, pertenencias por campaña, superior y estado.
+- Edición de datos de perfil autorizados; cambiar correo/celular de acceso requiere verificar el nuevo contacto.
+- Activar o desactivar la pertenencia a una campaña conservando evidencias e historial.
+- Baja global de una cuenta solo por administrador; un líder/coordinador no desactiva una cuenta en otras campañas.
+- Vista jerárquica de equipos y acceso a estadísticas según alcance.
+- Auditoría de altas, cambios, invitaciones y bajas con autor, fecha y campaña.
+- Asignación o cambio de líder y traslado de usuarios entre ramas solo por administrador.
+- El superior no puede elevar roles, asignarse privilegios ni editar usuarios de otra rama.
+- No permitir la baja del último administrador activo.
+- Desactivar un coordinador con colaboradores activos exige resolver antes su equipo: traslado administrativo o desactivación explícita de sus pertenencias.
+- La baja de usuarios no borra archivos del celular. Los registros pendientes de un usuario desactivado deben conservarse y tener un proceso de recuperación administrativa auditada.
+
+Criterios de aceptación:
+- La restricción por rama se aplica a listado, búsqueda, ficha, modificación e invitaciones en servidor.
+- Alterar el identificador de usuario o campaña en una solicitud no concede acceso a otro equipo.
+- Un líder puede consultar colaboradores descendientes, pero solo su coordinador o el administrador pueden administrarlos.
+- Una baja en una campaña no afecta pertenencias activas en otras campañas.
+- La desactivación bloquea nuevas operaciones autorizadas en servidor sin borrar evidencias existentes.
+
 ## Campañas
 Nombre, líder, ubicación (descripción y coordenadas/área), tipos habilitados: lonas, espectaculares, bardas.
 Un tipo implica campaña simple; dos o tres implican mixta.
