@@ -7,7 +7,7 @@ Versión 0.6: panel conectado a un servidor local de desarrollo, además del pro
 El servidor guarda usuarios, campañas, pertenencias, invitaciones y sesiones en SQLite; aplica permisos por rama en cada operación.
 Las invitaciones tienen contacto verificado, caducidad y uso único. El acceso local usa códigos aleatorios de prueba con vencimiento y límite de intentos.
 La API recibe archivos por fragmentos reanudables, los cifra en el servidor y solo confirma el registro tras verificar todos sus hashes.
-Android: primera beta nativa 0.1.0 con cámara propia, GPS, bóveda cifrada, recuperación y cliente de envío reanudable. Consulta [docs/ANDROID.md](docs/ANDROID.md).
+Android: beta nativa 0.1.1 con cámara propia, GPS, bóveda cifrada, notas visibles con guardado confirmado, altas de usuarios/campañas y cliente de envío reanudable. Consulta [docs/ANDROID.md](docs/ANDROID.md).
 Pendientes: validación en teléfonos físicos, proveedores de correo/SMS, alojamiento HTTPS de la API móvil, cartografía real en el panel, QR y gestión global completa de cuentas.
 El panel conectado aún no captura archivos: muestra evidencias recibidas por la API. No es una APK ni un servicio de producción.
 
@@ -42,7 +42,7 @@ Fuentes del panel: `src/domain.mjs`, `src/api.mjs`, `src/app.mjs`, `src/styles.c
 Servidor: `server/store.mjs`, `server/service.mjs`, `server/files.mjs`, `server/http.mjs` y `server/index.mjs`.
 `node build.mjs` genera el archivo autónomo `index.html`; no necesita dependencias instaladas.
 Las pruebas de dominio, servidor, cliente y pantallas conectadas usan datos ficticios, archivos temporales, HTTP real y JSDOM.
-Verificación: 64 pruebas automatizadas del proyecto y 55 comprobaciones JVM del núcleo Android. Incluyen recuperación tras reinicio y corte de conexión, permisos de API, CSRF, invitaciones y sellado inmutable. Revisión visual en navegador pendiente.
+Verificación: 64 pruebas automatizadas del proyecto y 91 comprobaciones JVM del núcleo Android. Incluyen recuperación tras reinicio y corte de conexión, permisos de API, CSRF, invitaciones y sellado inmutable. Revisión visual en navegador pendiente.
 
 ## Conservación en esta versión
 SQLite usa transacciones, WAL y sincronización completa. Los archivos recibidos se guardan por fragmentos con AES-256-GCM y escritura atómica.

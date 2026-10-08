@@ -22,9 +22,9 @@ La publicación web continúa siendo una demostración. La cámara, GPS real y a
 
 Validación realizada con pruebas automatizadas de pantallas, HTTP y base de datos. No se ha probado aún en un dispositivo Android físico ni se ha completado revisión visual en un navegador real.
 
-## Beta nativa Android 0.1.0
+## Beta nativa Android 0.1.1
 
-Paquete `com.controlpublicidad.app`, versión `0.1.0-beta`, código de versión `1`. Android 8.0/API 26 o superior; destino API 36. Es una aplicación nativa Java independiente de la publicación web, sin WebView ni permisos de galería, IMEI o almacenamiento compartido.
+Paquete `com.controlpublicidad.app`, versión `0.1.1-beta`, código de versión `2`. Android 8.0/API 26 o superior; destino API 36. Es una aplicación nativa Java independiente de la publicación web, sin WebView ni permisos de galería, IMEI o almacenamiento compartido.
 
 ### Lo que permite probar
 
@@ -33,9 +33,19 @@ Paquete `com.controlpublicidad.app`, versión `0.1.0-beta`, código de versión 
 - Tipos limitados a la campaña, con elección única. Los diez usuarios originales están en Cuenta → Elegir usuario de prueba. La asignación local de Sofía es «Casa Cantera · prueba Android», solo lona; es un fixture independiente de los cambios del navegador.
 - GPS por toma: coordenadas, precisión y fecha de lectura. Se prefiere ubicación precisa con antigüedad máxima de 30 segundos y precisión hasta 50 m. La captura sin una lectura válida requiere aceptación explícita y muestra GPS no disponible; nunca inventa coordenadas. No es GPS de fondo.
 - Nombre del autor, fecha/hora de captura o inicio del video, fabricante/marca/modelo y UUID de instalación. El teléfono no expone IMEI; se usa el identificador de instalación.
-- Notas y borrador recuperable. Sellar congela el manifiesto y su hash; sin confirmación del servidor permanece pendiente.
+- Notas con guardado automático, botón «Guardar notas» y confirmación. Se muestran en Mis envíos, en el detalle del registro y desde «Ver notas del registro» al abrir una foto/video. Un diario cifrado de notas conserva el último texto confirmado aunque la recuperación de una captura use una copia antigua del borrador. Sellar congela el manifiesto y su hash; sin confirmación del servidor permanece pendiente.
 - Mis envíos: gráfica de fotos/videos por día con referencias del eje izquierdo, selección de barra y lista filtrada. Revisión local de fotos/videos y apertura de sus coordenadas en Google Maps.
 - Botón de actualización real: sesión por código de correo/celular, cookie y CSRF contra una API HTTPS compatible; manifiesto idéntico, fragmentos faltantes, hashes y confirmación final. No simula envíos.
+
+### Administración nativa
+
+En Cuenta → Elegir usuario de prueba → Fidel Ramírez · Administrador, la app abre Administrar. Alta de usuario permite crear líderes, coordinadores y colaboradores: los dos últimos se asignan a una campaña y un superior activo. Crear campaña solicita nombre, ubicación, un líder activo y uno o varios tipos (mixta con dos o tres). El árbol muestra los equipos por campaña, con niveles, colores de rol y fichas con totales guardados en el teléfono. Los líderes disponen de Equipo para crear coordinadores propios; los coordinadores crean únicamente colaboradores de su rama. Un colaborador no ve la administración.
+
+El directorio local se inicializa una sola vez con los diez perfiles originales y se conserva cifrado; actualizar el APK no vuelve a cargar la semilla ni reinicia las altas. Los registros existentes permanecen en sus espacios de usuario y las campañas originales se conservan. Los usuarios nuevos también aparecen en el selector de perfiles de prueba. Este módulo añade **altas**; las invitaciones y las bajas/traslados de la vista web no se presentan como funciones nativas terminadas.
+
+En una cuenta conectada, los formularios utilizan las rutas existentes `/api/users` y `/api/campaigns`, con sesión/CSRF y comprobación final de permisos en el servidor; requieren internet. Las altas de prueba se quedan en el teléfono y no se importan a cuentas reales. La API remota y proveedores de códigos continúan pendientes de configuración.
+
+Instalar `0.1.1-beta` encima de `0.1.0-beta`: mismo paquete y certificado, código de versión mayor. No desinstalar ni borrar datos para actualizar.
 
 ### Conservación y límites de esta beta
 
@@ -55,7 +65,7 @@ No se debe desinstalar ni borrar datos con registros pendientes: también se per
 
 ### Compilar y verificar
 
-Requisitos: Python 3, Java 21 o superior y acceso a los archivos oficiales del SDK. Sin Gradle/AndroidX; utiliza aapt2, ECJ, D8, zipalign y apksigner oficiales. Los scripts verifican los checksums publicados de los archivos descargados.
+Requisitos: Python 3, Java 17 o superior y acceso a los archivos oficiales del SDK. Sin Gradle/AndroidX; utiliza aapt2, ECJ, D8, zipalign y apksigner oficiales. Los scripts verifican los checksums publicados de los archivos descargados.
 
 ```sh
 python3 scripts/setup-android-tools.py
@@ -71,7 +81,7 @@ La firma se verifica mediante APK Signature Scheme v2/v3; alineación por zipali
 
 ### Prueba en el teléfono
 
-1. Descargar e instalar `ControlPublicidad_Android_0.1.0_beta.apk`. Si Android lo solicita, permitir la instalación desde el navegador o gestor de archivos usado.
+1. Descargar e instalar `ControlPublicidad_Android_0.1.1_beta.apk`. Si Android lo solicita, permitir la instalación desde el navegador o gestor de archivos usado.
 2. Abrir la app. El perfil inicial es Sofía; elegir Casa Cantera e iniciar un registro. Solo se debe ofrecer Lona.
 3. Conceder Cámara y Ubicación precisa; para video, también Micrófono. Activar la ubicación del teléfono y esperar una lectura al aire libre.
 4. Tomar fotos y video, revisar su reproducción y tocar GPS para abrir el mapa.
@@ -81,4 +91,4 @@ La firma se verifica mediante APK Signature Scheme v2/v3; alineación por zipali
 8. Cambiar a Diego o Mariana y confirmar sus campañas/captura y que Mis envíos muestra únicamente su perfil. Volver a Sofía y comprobar conservación.
 9. Cuando esté alojada la API, verificar acceso por correo/SMS, asignaciones, envío en red móvil, pérdida de conexión a mitad de carga, reintento y número único confirmado. Comprobar que el original permanece en el teléfono.
 
-Compilación y firma verificadas; 64 pruebas del proyecto y 55 comprobaciones del núcleo Android aprobadas. Validación en teléfonos Android físicos pendiente; debe incluir Android 14/16, cámara/GPS de cada fabricante, permisos denegados, almacenamiento lleno, batería/cierre y conectividad intermitente.
+Compilación y firma verificadas; 64 pruebas del proyecto y 91 comprobaciones del núcleo Android aprobadas. El usuario confirmó GPS correcto en la primera prueba física; la actualización de notas y administración aún requiere prueba física; debe incluir Android 14/16, cámara/GPS de cada fabricante, permisos denegados, almacenamiento lleno, batería/cierre y conectividad intermitente.

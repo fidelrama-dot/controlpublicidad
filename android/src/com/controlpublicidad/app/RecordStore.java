@@ -18,7 +18,7 @@ public final class RecordStore {
  public synchronized void settings(JSONObject value)throws Exception{writeJson("settings.json",value);}
  public synchronized JSONObject record(String id)throws Exception{
   id=id(id);String cache="record-"+id+".json",seal="seal-"+id+".json";
-  if(!files.exists(seal))return json(cache);
+  if(!files.exists(seal)){JSONObject draft=json(cache);String note="notes-"+id+".json";if(files.exists(note)){JSONObject saved=json(note);if(!id.equals(saved.optString("id")))throw new IOException("Diario de notas inválido.");draft.put("notes",saved.getString("notes"));}return draft;}
   JSONObject r=json(seal);if(files.exists(cache))r.put("lastError",json(cache).optString("lastError"));
   if(files.exists("receipt-"+id+".json")){JSONObject receipt=json("receipt-"+id+".json");if(!id.equals(receipt.optString("id"))||!"synced".equals(receipt.optString("status"))||receipt.optInt("number")<=0)throw new IOException("Confirmación local inválida.");r.put("status","synced").put("number",receipt.getInt("number")).put("receivedAt",receipt.getString("confirmedLocallyAt")).put("lastError","");}
   return r;
@@ -30,14 +30,15 @@ public final class RecordStore {
  public synchronized JSONObject draft(String owner)throws Exception{for(JSONObject r:records(owner))if("draft".equals(r.optString("status")))return r;return null;}
  public synchronized JSONObject create(String owner,JSONObject actor,JSONObject campaign,JSONObject membership,JSONObject device)throws Exception{
   if(draft(owner)!=null)throw new IOException("Ya tienes un borrador. Continúa ese registro.");
-  JSONObject r=new JSONObject().put("id",UUID.randomUUID().toString()).put("owner",owner).put("authorId",actor.getString("id")).put("authorName",membership.optString("displayName",actor.getString("name"))).put("campaignId",campaign.getString("id")).put("campaignName",campaign.getString("name")).put("membershipId",membership.getString("id")).put("allowedTypes",new JSONArray(campaign.getJSONArray("types").toString())).put("type",campaign.getJSONArray("types").getString(0)).put("notes","").put("device",device).put("media",new JSONArray()).put("status","draft").put("createdAt",now());
+  JSONObject r=new JSONObject().put("id",UUID.randomUUID().toString()).put("owner",owner).put("authorId",actor.getString("id")).put("authorName",membership.isNull("displayName")||membership.optString("displayName").trim().isEmpty()?actor.getString("name"):membership.getString("displayName")).put("campaignId",campaign.getString("id")).put("campaignName",campaign.getString("name")).put("membershipId",membership.getString("id")).put("allowedTypes",new JSONArray(campaign.getJSONArray("types").toString())).put("type",campaign.getJSONArray("types").getString(0)).put("notes","").put("device",device).put("media",new JSONArray()).put("status","draft").put("createdAt",now());
   writeJson("record-"+r.getString("id")+".json",r);return r;
  }
  private static void editable(JSONObject r)throws Exception{if(!"draft".equals(r.getString("status")))throw new IOException("El registro sellado no se puede modificar.");}
  public synchronized JSONObject update(String rid,String type,String notes)throws Exception{
   JSONObject r=record(rid);editable(r);if(!contains(r.getJSONArray("allowedTypes"),type))throw new IOException("Tipo no habilitado en esta campaña.");if(notes.length()>1000)throw new IOException("Notas: máximo 1,000 caracteres.");
-  r.put("type",type).put("notes",notes);writeJson("record-"+rid+".json",r);return r;
+  r.put("type",type).put("notes",notes);writeJson("notes-"+rid+".json",new JSONObject().put("id",rid).put("notes",notes));writeJson("record-"+rid+".json",r);return r;
  }
+ public synchronized JSONObject updateNotes(String rid,String notes)throws Exception{JSONObject r=record(rid);if(notes.equals(r.optString("notes")))return r;return update(rid,r.getString("type"),notes);}
  public static boolean contains(JSONArray values,String text){for(int i=0;i<values.length();i++)if(text.equals(values.optString(i)))return true;return false;}
  public static int count(JSONObject r,String kind)throws Exception{int n=0;JSONArray a=r.getJSONArray("media");for(int i=0;i<a.length();i++)if(kind.equals(a.getJSONObject(i).getString("kind")))n++;return n;}
  public synchronized JSONObject begin(String rid,String kind,JSONObject gps)throws Exception{
@@ -67,7 +68,7 @@ public final class RecordStore {
  private void attach(JSONObject journal)throws Exception{
   String rid=id(journal.getString("recordId"));JSONObject r=files.exists("record-"+rid+".json")?record(rid):new JSONObject(journal.getJSONObject("record").toString());
   JSONObject media=journal.getJSONObject("media");JSONArray a=r.getJSONArray("media");for(int i=0;i<a.length();i++)if(a.getJSONObject(i).getString("id").equals(media.getString("id")))return;
-  editable(r);a.put(media);writeJson("record-"+rid+".json",r);
+  editable(r);String note="notes-"+rid+".json";if(files.exists(note))r.put("notes",json(note).getString("notes"));a.put(media);writeJson("record-"+rid+".json",r);
  }
  public synchronized void archiveInterrupted()throws Exception{
   JSONObject p=pending();if(p==null||!files.exists("recovery-"+p.getString("id")+".bin"))throw new IOException("No se encontró una copia cifrada de la grabación.");

@@ -27,7 +27,7 @@ if not keystore.exists():
  password.write_text(secrets.token_urlsafe(40));password.chmod(0o600)
  run(['keytool','-genkeypair','-alias','controlpublicidad','-keyalg','RSA','-keysize','3072','-validity','10000','-keystore',keystore,'-storetype','PKCS12','-storepass:file',password,'-keypass:file',password,'-dname','CN=ControlPublicidad, OU=Android Beta, O=ControlPublicidad, L=Morelia, ST=Michoacan, C=MX'])
  keystore.chmod(0o600)
-apk=out/'ControlPublicidad_Android_0.1.0_beta.apk'
+apk=out/'ControlPublicidad_Android_0.1.1_beta.apk'
 run(['java','-jar',sdk/'lib/apksigner.jar','sign','--ks',keystore,'--ks-key-alias','controlpublicidad','--ks-pass','file:'+str(password),'--out',apk,build/'aligned.apk'])
 run(['java','-jar',sdk/'lib/apksigner.jar','verify','--verbose','--print-certs',apk])
 run([sdk/'zipalign','-c','-p','4',apk])
