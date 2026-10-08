@@ -1,0 +1,210 @@
+{
+  "users": [
+    {
+      "id": "a1",
+      "name": "Fidel Ramírez",
+      "role": "admin",
+      "contact": "admin@example.invalid"
+    },
+    {
+      "id": "l1",
+      "name": "Mariana Torres",
+      "role": "leader",
+      "contact": "mariana@example.invalid"
+    },
+    {
+      "id": "l2",
+      "name": "Andrés Rojas",
+      "role": "leader",
+      "contact": "andres@example.invalid"
+    },
+    {
+      "id": "c1",
+      "name": "Diego Méndez",
+      "role": "coordinator",
+      "contact": "diego@example.invalid"
+    },
+    {
+      "id": "c2",
+      "name": "Elena García",
+      "role": "coordinator",
+      "contact": "elena@example.invalid"
+    },
+    {
+      "id": "c3",
+      "name": "Pablo Ruiz",
+      "role": "coordinator",
+      "contact": "pablo@example.invalid"
+    },
+    {
+      "id": "f1",
+      "name": "Sofía López",
+      "role": "collaborator",
+      "contact": "sofia@example.invalid"
+    },
+    {
+      "id": "f2",
+      "name": "Luis Hernández",
+      "role": "collaborator",
+      "contact": "luis@example.invalid"
+    },
+    {
+      "id": "f3",
+      "name": "Valeria Cruz",
+      "role": "collaborator",
+      "contact": "valeria@example.invalid"
+    },
+    {
+      "id": "f4",
+      "name": "Carlos Vega",
+      "role": "collaborator",
+      "contact": "carlos@example.invalid"
+    }
+  ],
+  "campaigns": [
+    {
+      "id": "p1",
+      "name": "Morelia se mueve",
+      "location": "Centro Histórico, Morelia",
+      "leaderId": "l1",
+      "types": [
+        "lona",
+        "espectacular",
+        "barda"
+      ],
+      "color": "mint",
+      "status": "active"
+    },
+    {
+      "id": "p2",
+      "name": "Presencia en el poniente",
+      "location": "Av. Madero Poniente, Morelia",
+      "leaderId": "l2",
+      "types": [
+        "espectacular"
+      ],
+      "color": "sand",
+      "status": "active"
+    },
+    {
+      "id": "p3",
+      "name": "Comunidad visible",
+      "location": "Altozano, Morelia",
+      "leaderId": "l1",
+      "types": [
+        "lona",
+        "barda"
+      ],
+      "color": "lilac",
+      "status": "active"
+    },
+    {
+      "id": "android-test-casa-cantera",
+      "name": "Casa Cantera · prueba Android",
+      "location": "Morelia",
+      "leaderId": "l1",
+      "types": [
+        "lona"
+      ],
+      "status": "active"
+    }
+  ],
+  "memberships": [
+    {
+      "id": "m1",
+      "campaignId": "p1",
+      "userId": "l1",
+      "role": "leader",
+      "parentId": null,
+      "status": "active"
+    },
+    {
+      "id": "m2",
+      "campaignId": "p1",
+      "userId": "c1",
+      "role": "coordinator",
+      "parentId": "m1",
+      "status": "active"
+    },
+    {
+      "id": "m3",
+      "campaignId": "p1",
+      "userId": "c2",
+      "role": "coordinator",
+      "parentId": "m1",
+      "status": "active"
+    },
+    {
+      "id": "m5",
+      "campaignId": "p1",
+      "userId": "f2",
+      "role": "collaborator",
+      "parentId": "m2",
+      "status": "active"
+    },
+    {
+      "id": "m6",
+      "campaignId": "p1",
+      "userId": "f3",
+      "role": "collaborator",
+      "parentId": "m3",
+      "status": "active"
+    },
+    {
+      "id": "m7",
+      "campaignId": "p2",
+      "userId": "l2",
+      "role": "leader",
+      "parentId": null,
+      "status": "active"
+    },
+    {
+      "id": "m8",
+      "campaignId": "p2",
+      "userId": "c3",
+      "role": "coordinator",
+      "parentId": "m7",
+      "status": "active"
+    },
+    {
+      "id": "m9",
+      "campaignId": "p2",
+      "userId": "f4",
+      "role": "collaborator",
+      "parentId": "m8",
+      "status": "active"
+    },
+    {
+      "id": "m10",
+      "campaignId": "p3",
+      "userId": "l1",
+      "role": "leader",
+      "parentId": null,
+      "status": "active"
+    },
+    {
+      "id": "android-test-cc-leader",
+      "campaignId": "android-test-casa-cantera",
+      "userId": "l1",
+      "role": "leader",
+      "parentId": null,
+      "status": "active"
+    },
+    {
+      "id": "android-test-cc-coordinator",
+      "campaignId": "android-test-casa-cantera",
+      "userId": "c1",
+      "role": "coordinator",
+      "parentId": "android-test-cc-leader",
+      "status": "active"
+    },
+    {
+      "id": "android-test-cc-sofia",
+      "campaignId": "android-test-casa-cantera",
+      "userId": "f1",
+      "role": "collaborator",
+      "parentId": "android-test-cc-coordinator",
+      "status": "active"
+    }
+  ]
+}

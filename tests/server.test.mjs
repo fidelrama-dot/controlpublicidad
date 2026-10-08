@@ -287,3 +287,19 @@ test('leader and coordinator receive, upload and confirm only their own records 
   forbidden(()=>f.service.createRecord(f.actor('c1'),manifest('m8')),403);forbidden(()=>f.service.createRecord(f.actor('l1'),manifest('m7')),403);
   f.close();
 });
+
+test('Android receives only eligible own capture assignments without exposing parent or sibling branches',()=>{
+ const f=fixture();
+ try{
+  assert.deepEqual(f.service.bootstrap(f.actor('f1')).captureAssignments,[{membershipId:'m4',campaignId:'p1'}]);
+  assert.deepEqual(f.service.bootstrap(f.actor('f1')).memberships.map(m=>m.id),['m4']);
+  assert.deepEqual(f.service.bootstrap(f.actor('c1')).captureAssignments,[{membershipId:'m2',campaignId:'p1'}]);
+  assert.deepEqual(f.service.bootstrap(f.actor('l1')).captureAssignments,[{membershipId:'m1',campaignId:'p1'},{membershipId:'m10',campaignId:'p3'}]);
+  assert.deepEqual(f.service.bootstrap(f.actor('a1')).captureAssignments,[]);
+  f.store.run("UPDATE memberships SET status='inactive' WHERE id='m2'");
+  assert.deepEqual(f.service.bootstrap(f.actor('f1')).captureAssignments,[]);
+  f.store.run("UPDATE memberships SET status='active' WHERE id='m2'");
+  const moved=f.service.transferMember(f.actor('a1'),'m4',{parentId:'m8'});
+  assert.deepEqual(f.service.bootstrap(f.actor('f1')).captureAssignments,[{membershipId:moved.membershipId,campaignId:'p2'}]);
+ }finally{f.close();}
+});

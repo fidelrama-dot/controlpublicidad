@@ -1,5 +1,5 @@
 import {createHash,randomBytes,randomInt,randomUUID,timingSafeEqual} from 'node:crypto';
-import {seedData,scopedMemberships,visibleCampaigns,canManageMember,visibleRecords,validateCampaign,manualAssignment,transferTarget,assertDeletable,CAPTURE_ROLES,TYPE_NAMES,finalFilename} from '../src/domain.mjs';
+import {seedData,scopedMemberships,visibleCampaigns,canManageMember,visibleRecords,validateCampaign,manualAssignment,transferTarget,assertDeletable,CAPTURE_ROLES,TYPE_NAMES,finalFilename,captureCampaigns} from '../src/domain.mjs';
 import {CHUNK_BYTES} from './files.mjs';
 export class ApiError extends Error {constructor(status,message){super(message);this.status=status;}}
 export const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -66,7 +66,9 @@ export class Service {
   bootstrap(actor){
     const d=this.data(),members=scopedMemberships(d,actor),memberIds=new Set(members.map(m=>m.id));
     const campaigns=visibleCampaigns(d,actor),users=new Set(members.map(m=>m.userId));users.add(actor.id);
-    const result={users:actor.role==='admin'?d.users:d.users.filter(u=>users.has(u.id)),campaigns,memberships:members,records:visibleRecords(d,actor).filter(r=>r.status==='synced'),invitations:d.invitations.filter(i=>actor.role==='admin'||i.createdBy===actor.id||memberIds.has(i.membershipId)),audit:d.audit.filter(a=>actor.role==='admin'||a.actorId===actor.id),drafts:{}};
+    const captureIds=new Set(captureCampaigns(d,actor).map(c=>c.id));
+    const captureAssignments=d.memberships.filter(m=>m.userId===actor.id&&m.role===actor.role&&m.status==='active'&&captureIds.has(m.campaignId)).map(m=>({membershipId:m.id,campaignId:m.campaignId}));
+    const result={captureAssignments,users:actor.role==='admin'?d.users:d.users.filter(u=>users.has(u.id)),campaigns,memberships:members,records:visibleRecords(d,actor).filter(r=>r.status==='synced'),invitations:d.invitations.filter(i=>actor.role==='admin'||i.createdBy===actor.id||memberIds.has(i.membershipId)),audit:d.audit.filter(a=>actor.role==='admin'||a.actorId===actor.id),drafts:{}};
     return result;
   }
   member(actor,id,manage=false){
