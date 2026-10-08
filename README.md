@@ -3,7 +3,7 @@
 Sistema de evidencias fotográficas y videos con GPS para campañas de lonas, espectaculares y bardas.
 
 ## Estado
-Versión 0.5: panel conectado a un servidor local de desarrollo, además del prototipo autónomo.
+Versión 0.6: panel conectado a un servidor local de desarrollo, además del prototipo autónomo.
 El servidor guarda usuarios, campañas, pertenencias, invitaciones y sesiones en SQLite; aplica permisos por rama en cada operación.
 Las invitaciones tienen contacto verificado, caducidad y uso único. El acceso local usa códigos aleatorios de prueba con vencimiento y límite de intentos.
 La API recibe archivos por fragmentos reanudables, los cifra en el servidor y solo confirma el registro tras verificar todos sus hashes.
@@ -41,7 +41,7 @@ Fuentes del panel: `src/domain.mjs`, `src/api.mjs`, `src/app.mjs`, `src/styles.c
 Servidor: `server/store.mjs`, `server/service.mjs`, `server/files.mjs`, `server/http.mjs` y `server/index.mjs`.
 `node build.mjs` genera el archivo autónomo `index.html`; no necesita dependencias instaladas.
 Las pruebas de dominio, servidor, cliente y pantallas conectadas usan datos ficticios, archivos temporales, HTTP real y JSDOM.
-Verificación: 56 pruebas automatizadas. Incluyen recuperación tras reinicio y corte de conexión, permisos de API, CSRF, invitaciones y sellado inmutable. Revisión visual en navegador pendiente.
+Verificación: 63 pruebas automatizadas. Incluyen recuperación tras reinicio y corte de conexión, permisos de API, CSRF, invitaciones y sellado inmutable. Revisión visual en navegador pendiente.
 
 ## Conservación en esta versión
 SQLite usa transacciones, WAL y sincronización completa. Los archivos recibidos se guardan por fragmentos con AES-256-GCM y escritura atómica.
@@ -197,3 +197,10 @@ Los avatares distinguen líder (azul), coordinador (verde) y colaborador (amaril
 `cloud/db/schema.ts` y `cloud/drizzle/` contienen el esquema y las migraciones generadas. En el checkout de Sites se copian a `db/schema.ts` y `drizzle/`; el despliegue aplica las migraciones antes de publicar el Worker. No se crean tablas desde las solicitudes. `cloud/build.mjs` empaqueta el panel en un Worker ESM; se ejecuta después de `build.mjs` en el checkout de Sites.
 
 Esta persistencia NO recibe fotos o videos reales: las vistas de captura siguen usando ilustraciones y metadatos de ejemplo. Los borradores y la cola local del prototipo no están cifrados. La cámara/GPS reales, bóveda offline cifrada y entrega de OTP en Android continúan pendientes. No usar esta prueba para la única captura de un trabajo real.
+
+## Captura por rol y navegación de evidencias (0.6)
+Líderes y coordinadores disponen de Nuevo registro y Mis envíos en sus propias campañas, con las mismas restricciones de tipo, 10 fotografías, 3 videos y sellado que los colaboradores. El autor se fija a partir del usuario y su propia pertenencia activa; no se permite crear ni subir registros de un subordinado. Mis envíos muestra únicamente evidencias propias, mientras Resumen conserva las estadísticas de la rama autorizada. Las reglas se aplican en dominio, nube de prueba y API local.
+
+Al seleccionar una barra diaria se abren Evidencias con la fecha de México y el tipo de archivo de esa barra. Las barras de Mis envíos conservan el filtro de autor propio. El selector «Fotos y videos / Fotografías / Videos» hace visible ese filtro. Limpiar vacía fechas, campaña y filtro de archivo, desmarca lona/espectacular/barda y muestra cero registros hasta seleccionar tipos de nuevo. La entrada inicial continúa con todos los tipos marcados.
+
+El campo GPS del detalle de una foto o video, desde Evidencias o Mapa, abre Google Maps en otra pestaña mediante una URL universal. Se usa el GPS del archivo seleccionado cuando existe; coordenadas ausentes o fuera de rango no generan enlace. El formato sigue la documentación de Google: https://developers.google.com/maps/documentation/urls/get-started.

@@ -1,4 +1,4 @@
-import { TYPE_NAMES, ROLE_NAMES, CHILD_ROLE, seedData, scopedMemberships, visibleCampaigns, canManageMember, visibleRecords, filterRecords, validateCampaign, assertCapture, assertEditable, finalFilename, dateInMexico, descendants, teamSummary, manualAssignment, transferTarget, captureCampaigns, assertDeletable, dailyEvidence } from './domain.mjs';
+import { TYPE_NAMES, ROLE_NAMES, CAPTURE_ROLES, CHILD_ROLE, seedData, scopedMemberships, visibleCampaigns, canManageMember, visibleRecords, filterRecords, validateCampaign, assertCapture, assertEditable, finalFilename, dateInMexico, descendants, teamSummary, manualAssignment, transferTarget, captureCampaigns, assertDeletable, dailyEvidence, googleMapsUrl } from './domain.mjs';
 import { ApiClient, PreviewCloudClient } from './api.mjs';
 
 const app=document.querySelector('#app');
@@ -11,7 +11,7 @@ let data=serverMode?{users:[],campaigns:[],memberships:[],records:[],invitations
 if(!serverMode)try { const saved=JSON.parse(localStorage.getItem(STORAGE_KEY)); if(saved?.version===1) data=saved.data; } catch {}
 data.drafts ||= {};
 data.deletions ||= [];
-const state={logged:false,actorId:'a1',view:'dashboard',loginMode:'email',loginStep:1,loginContact:'',developmentCode:'',inviteLinks:{},usersSearch:'',userCampaign:'',userRole:'',userStatus:'',tableOpen:false,branchOpen:{},filters:{campaign:'',types:Object.keys(TYPE_NAMES),from:'',to:''},successId:null,cloudState:cloud?'connecting':'unavailable',cloudBusy:false};
+const state={logged:false,actorId:'a1',view:'dashboard',loginMode:'email',loginStep:1,loginContact:'',developmentCode:'',inviteLinks:{},usersSearch:'',userCampaign:'',userRole:'',userStatus:'',tableOpen:false,branchOpen:{},filters:{campaign:'',types:Object.keys(TYPE_NAMES),from:'',to:'',mediaKind:'',personal:false},successId:null,cloudState:cloud?'connecting':'unavailable',cloudBusy:false};
 const pages={dashboard:'Resumen',campaigns:'Campañas',users:'Usuarios y equipos',evidence:'Evidencias',map:'Mapa de evidencias',capture:'Nuevo registro',sync:'Mis envíos'};
 const ids=()=>globalThis.crypto?.randomUUID?.()||'demo-'+Date.now()+'-'+Math.random().toString(36).slice(2);
 const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -81,7 +81,7 @@ async function syncCloud(manual=false){
   if(state.cloudBusy)return;
   await syncDeletions();
   if(state.cloudBusy)return;
-  const records=state.logged?ownRecords().filter(r=>r.status==='pending'):[];
+  const records=state.logged?(actor().role==='admin'?ownRecords():personalRecords()).filter(r=>r.status==='pending'):[];
   if(!records.length)return;
   if(!cloud){if(manual)toast('La nube no está conectada a esta copia. Los registros siguen pendientes.');return;}
   state.cloudBusy=true;render();let count=0;
@@ -148,20 +148,21 @@ function stat(label,value,note,ic,featured=false){return `<div class="stat ${fea
 function pageHead(title,subtitle,button='',eyebrow='ESPACIO DE TRABAJO'){return `<div class="page-head"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1><p class="sub">${subtitle}</p></div>${button}</div>`;}
 function empty(message){return `<div class="empty">${icon('layers',30)}<h3>${message}</h3><p>Prueba otra selección o agrega datos de ejemplo.</p></div>`;}
 function ownRecords(){return visibleRecords(data,actor());}
-function filtered(){return filterRecords(ownRecords(),state.filters);}
+function personalRecords(){return ownRecords().filter(r=>(r.author?.id||data.memberships.find(m=>m.id===r.membershipId)?.userId)===actor().id);}
+function filtered(){return filterRecords(state.filters.personal?personalRecords():ownRecords(),state.filters);}
 function campaignOptions(selected=''){return visibleCampaigns(data,actor()).map(c=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${e(c.name)}</option>`).join('');}
 function navigate(view){
   const collaborator=actor().role==='collaborator';
   if(view==='home')view=collaborator?'capture':'dashboard';
-  if(collaborator&&!['capture','sync'].includes(view)) view='capture';
-  if(!collaborator&&['capture','sync'].includes(view)) view='dashboard';
+  if(collaborator&&!['capture','sync','evidence'].includes(view)) view='capture';
+  if(!collaborator&&!CAPTURE_ROLES.includes(actor().role)&&['capture','sync'].includes(view)) view='dashboard';
   state.view=view;state.successId=null;render();window.scrollTo({top:0,behavior:'instant'});
 }
 function render(){
   if(!state.logged){renderLogin();return;}
   const u=actor(), coll=u.role==='collaborator';
-  const nav=coll?[['capture','camera'],['sync','upload']]:[['dashboard','grid'],['campaigns','flag'],['users','users'],['evidence','camera'],['map','map']];
-  const pending=ownRecords().filter(r=>r.status==='pending').length;
+  const nav=coll?[['capture','camera'],['sync','upload']]:[['dashboard','grid'],['campaigns','flag'],['users','users'],['evidence','camera'],['map','map'],...(CAPTURE_ROLES.includes(u.role)?[['capture','plus'],['sync','upload']]:[])];
+  const pending=personalRecords().filter(r=>r.status==='pending').length;
   const topOptions=[['a1','Administrador'],['l1','Líder · Mariana'],['l2','Líder · Andrés'],['c1','Coordinador · Diego'],['c2','Coordinador · Elena'],['f1','Colaboradora · Sofía'],['f3','Colaboradora · Valeria']].map(([id,name])=>`<option value="${id}" ${u.id===id?'selected':''}>${name}</option>`).join('');
   app.innerHTML=`<div class="shell"><aside class="sidebar">${brand()}<div class="workspace-label">${coll?'Trabajo de campo':'Administración'}</div>
     <nav class="nav" aria-label="Navegación principal">${nav.map(([v,ic])=>`<button class="nav-link ${state.view===v?'active':''}" data-nav="${v}" ${state.view===v?'aria-current="page"':''}>${icon(ic)}<span>${pages[v]}</span>${v==='sync'&&pending?`<b class="count">${pending}</b>`:''}</button>`).join('')}</nav>
@@ -192,9 +193,9 @@ function renderServerLogin(){
     `${field('Código de verificación','login-code','<input id="login-code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code">')}${state.developmentCode?`<p class="sub" style="font-size:12px">Código de desarrollo: <strong>${e(state.developmentCode)}</strong></p>`:''}<button class="btn" type="submit">${new URLSearchParams(location.search).get('invite')?'Verificar y aceptar invitación':'Entrar'} ${icon('arrow',16)}</button><button class="btn ghost" type="button" data-action="login-back">Cambiar contacto</button>`}<div id="login-error" class="form-error" role="alert"></div></form><div class="notice amber">${icon('info',17)}<span>Servidor local de desarrollo. Los cambios se guardan en la base de datos. No se envían SMS ni correos; no es una conexión a la nube.</span></div><div class="login-bottom">Usuarios de prueba: admin@example.invalid · mariana@example.invalid · diego@example.invalid · sofia@example.invalid</div></section></div>`;
 }
 function renderPage(){return ({dashboard:dashboardPage,campaigns:campaignsPage,users:usersPage,evidence:evidencePage,map:mapPage,capture:capturePage,sync:syncPage}[state.view]||dashboardPage)();}
-function dailyChart(records){
+function dailyChart(records,personal=false){
   const days=dailyEvidence(records),peak=Math.max(1,...days.flatMap(d=>[d.photos,d.videos])),step=Math.max(1,Math.ceil(peak/4)),max=step*4;
-  return `<section class="card daily-chart"><div class="section-heading"><div><h2>Evidencias por día</h2><p>Últimos 4 días con referencia a la captura más reciente · hora de México</p></div>${icon('chart',18)}</div><div class="daily-chart-grid"><div class="chart-axis" aria-label="Escala de cantidad de archivos">${[4,3,2,1,0].map(n=>`<span>${n*step}</span>`).join('')}</div><div class="chart-plot"><div class="chart-gridlines" aria-hidden="true">${[4,3,2,1,0].map(()=>'<i></i>').join('')}</div><div class="chart">${days.map(d=>`<div class="bar-group">${[['photo','photos','fotografías'],['video','videos','videos']].map(([kind,key,label])=>{const text=`${fmtDate(d.day+'T12:00:00Z',true)} · ${d[key]} ${label}`;return `<button class="chart-bar ${kind==='video'?'secondary':''}" data-action="chart-bar" data-day="${d.day}" data-count="${d[key]}" data-label="${e(text)}" aria-label="${e(text)}" aria-pressed="false"><span class="bar-fill" style="height:${d[key]/max*100}%"></span><span class="bar-tooltip" role="tooltip">${e(text)}</span></button>`;}).join('')}</div>`).join('')}</div></div><div></div><div class="chart-labels">${days.map(d=>`<span>${fmtDate(d.day+'T12:00:00Z',true)}</span>`).join('')}</div></div><div class="legend"><span><i></i>Fotografías</span><span><i class="pale"></i>Videos</span></div><p class="chart-readout" role="status" aria-live="polite">Pasa el cursor o toca una barra para ver su cantidad.</p></section>`;
+  return `<section class="card daily-chart"><div class="section-heading"><div><h2>Evidencias por día</h2><p>Últimos 4 días con referencia a la captura más reciente · hora de México</p></div>${icon('chart',18)}</div><div class="daily-chart-grid"><div class="chart-axis" aria-label="Escala de cantidad de archivos">${[4,3,2,1,0].map(n=>`<span>${n*step}</span>`).join('')}</div><div class="chart-plot"><div class="chart-gridlines" aria-hidden="true">${[4,3,2,1,0].map(()=>'<i></i>').join('')}</div><div class="chart">${days.map(d=>`<div class="bar-group">${[['photo','photos','fotografías'],['video','videos','videos']].map(([kind,key,label])=>{const text=`${fmtDate(d.day+'T12:00:00Z',true)} · ${d[key]} ${label}`;return `<button class="chart-bar ${kind==='video'?'secondary':''}" data-action="chart-bar" data-day="${d.day}" data-media-kind="${kind}" data-personal="${personal}" data-count="${d[key]}" data-label="${e(text)}" aria-label="${e(text)}" aria-pressed="false"><span class="bar-fill" style="height:${d[key]/max*100}%"></span><span class="bar-tooltip" role="tooltip">${e(text)}</span></button>`;}).join('')}</div>`).join('')}</div></div><div></div><div class="chart-labels">${days.map(d=>`<span>${fmtDate(d.day+'T12:00:00Z',true)}</span>`).join('')}</div></div><div class="legend"><span><i></i>Fotografías</span><span><i class="pale"></i>Videos</span></div><p class="chart-readout" role="status" aria-live="polite">Pasa el cursor para ver la cantidad; toca una barra para abrir sus registros.</p></section>`;
 }
 function authorStatus(record){return data.memberships.find(m=>m.id===record.membershipId)?.status==='deleted'||user(record.author?.id)?.deleted?'<span class="author-deleted">Dado de baja</span>':'';}
 function deleteUserDialog(id){
@@ -287,12 +288,13 @@ function recordFilters(){
   const availableTypes=[...new Set((state.filters.campaign?[campaign(state.filters.campaign)]:visibleCampaigns(data,actor())).flatMap(c=>c?.types||[]))];
   return `<div class="filters"><select id="filter-campaign" aria-label="Filtrar evidencias por campaña"><option value="">Todas las campañas</option>${campaignOptions(state.filters.campaign)}</select>
   <div class="filter-dates"><input id="filter-from" type="date" aria-label="Fecha inicial" title="Fecha inicial" value="${state.filters.from}"><input id="filter-to" type="date" aria-label="Fecha final" title="Fecha final" value="${state.filters.to}"></div>
+  <select id="filter-media-kind" aria-label="Filtrar evidencias por fotografía o video">${[['','Fotos y videos'],['photo','Fotografías'],['video','Videos']].map(([v,n])=>`<option value="${v}" ${state.filters.mediaKind===v?'selected':''}>${n}</option>`).join('')}</select>
   <div class="type-filter">${availableTypes.map(t=>`<label><input type="checkbox" name="filter-type" value="${t}" ${state.filters.types.includes(t)?'checked':''}>${TYPE_NAMES[t]}</label>`).join('')}</div><button class="btn ghost" data-action="clear-filters">Limpiar</button></div>`;
 }
 function evidencePage(){
   const rs=filtered();
-  return `${pageHead('Evidencias','Cada registro conserva su autor, ubicación y momento de captura.',`<button class="btn secondary" data-nav="map">${icon('map',17)} Ver mapa</button>`,'REGISTROS DE CAMPO')}
-  ${recordFilters()}<div class="between" style="margin-bottom:18px"><span class="muted" style="font-size:11px">${rs.length} registros en tu alcance</span><span class="pill">${icon('shield',12)} Originales sellados</span></div>
+  return `${pageHead('Evidencias','Cada registro conserva su autor, ubicación y momento de captura.',actor().role==='collaborator'?`<button class="btn secondary" data-nav="sync">Mis envíos</button>`:`<button class="btn secondary" data-nav="map">${icon('map',17)} Ver mapa</button>`,'REGISTROS DE CAMPO')}
+  ${recordFilters()}${state.filters.personal?`<div class="notice">${icon('camera',16)}<span>Mostrando únicamente tus registros, según la selección de Mis envíos.</span></div>`:''}<div class="between" style="margin-bottom:18px"><span class="muted" style="font-size:11px">${rs.length} registros en tu alcance</span><span class="pill">${icon('shield',12)} Originales sellados</span></div>
   <div class="evidence-grid">${[...rs].sort((a,b)=>new Date(b.capturedAt)-new Date(a.capturedAt)).map((r,i)=>{
     const m=data.memberships.find(m=>m.id===r.membershipId),photos=r.media.filter(m=>m.kind==='photo').length,vids=r.media.length-photos;
     return `<button class="card evidence-card" data-action="record-detail" data-id="${r.id}">${evidenceArt(r,i).replace('</div>',`<span class="photo-count">${icon('camera',12)} ${photos} ${vids?`· ${icon('video',12)} ${vids}`:''}</span></div>`)}<div class="evidence-body"><div class="between">${typePill(r.type)}<span class="muted" style="font-size:10px">#${String(r.number).padStart(3,'0')}</span></div><h3>${e(campaign(r.campaignId)?.name)}</h3><p>${e(r.author?.name||user(m?.userId)?.name)}${authorStatus(r)}</p><div class="meta"><span>${fmtDate(r.capturedAt)}</span><span>${Number.isFinite(r.accuracy)?'GPS ±'+r.accuracy+' m':'Sin GPS'}</span></div></div></button>`;
@@ -334,16 +336,16 @@ function capturePage(){
   <section class="card capture-section"><div class="between"><h2 style="margin-bottom:0">Evidencias del registro</h2><span class="pill">Solo captura desde app</span></div><p class="sub" style="font-size:11px">Hasta 10 fotografías y 3 videos. Aquí agregaremos ejemplos para probar el flujo.</p>
   <div class="media-actions"><button class="capture-btn" data-action="add-media" data-kind="photo" ${photos>=10?'disabled':''}>${icon('camera',29)}Agregar foto demo<small>${photos} de 10 fotografías</small></button><button class="capture-btn" data-action="add-media" data-kind="video" ${vids>=3?'disabled':''}>${icon('video',29)}Agregar video demo<small>${vids} de 3 videos</small></button></div>
   <div class="thumbnails">${d.media.map((m,i)=>`<div class="thumb">${photoArt(i)}<button class="remove" data-action="remove-media" data-index="${i}" aria-label="Quitar ejemplo ${i+1}">${icon('close',12)}</button><p>${m.kind==='photo'?'Foto':'Video'} ${i+1} · demo</p></div>`).join('')}</div>
-  <div class="capture-meta"><div><small>Colaborador</small>${e(actor().name)}</div><div><small>Ubicación de ejemplo · GPS simulado</small>19.70500, −101.19800 · ±6 m</div><div><small>Fecha y hora del primer ejemplo</small>${d.capturedAt?fmtDate(d.capturedAt):'Se asignará al agregar evidencia'}</div><div><small>Dispositivo de ejemplo</small>Samsung · SM-A566E</div></div></section>
+  <div class="capture-meta"><div><small>Autor · ${ROLE_NAMES[actor().role]}</small>${e(actor().name)}</div><div><small>Ubicación de ejemplo · GPS simulado</small>19.70500, −101.19800 · ±6 m</div><div><small>Fecha y hora del primer ejemplo</small>${d.capturedAt?fmtDate(d.capturedAt):'Se asignará al agregar evidencia'}</div><div><small>Dispositivo de ejemplo</small>Samsung · SM-A566E</div></div></section>
   <section class="card capture-section">${field('Notas del registro','capture-notes',`<textarea id="capture-notes" rows="3" maxlength="1000" placeholder="Agrega observaciones del punto…">${e(d.notes)}</textarea>`)}<p class="sub" style="font-size:10px">Opcional · máximo 1,000 caracteres.</p></section></div>
   <div class="capture-footer"><div class="row muted" style="font-size:10px">${icon('shield',15)} Borrador de ejemplo · sin evidencia real</div><button class="btn" data-action="seal-record" ${!d.media.length||!d.type?'disabled':''}>${icon('check',17)} Sellar registro demo</button></div><div class="notice amber" style="margin-top:18px">${icon('info',16)}<span>La captura con cámara, GPS real y almacenamiento cifrado se implementará en la app móvil.</span></div></div>`;
 }
 function syncPage(){
-  const rs=ownRecords(),pending=rs.filter(r=>r.status==='pending');
-  if(serverMode)return `${pageHead('Mis registros','Evidencias confirmadas por el servidor.','','TRABAJO DE CAMPO')}<div class="notice">${icon('shield',16)}<span>Solo aparecen registros con todos sus archivos verificados. La cola pendiente del teléfono se conectará en la app móvil.</span></div>${dailyChart(rs)}<div class="card" style="margin-top:20px">${rs.map(r=>`<div class="sync-row"><div><h3>${e(r.campaignName)}</h3><p>#${r.number} · ${r.media.length} archivos · ${fmtDate(r.capturedAt)}</p></div><button class="btn secondary" data-action="record-detail" data-id="${r.id}">Ver evidencia</button></div>`).join('')||empty('Aún no hay registros confirmados')}</div>`;
+  const rs=personalRecords(),pending=rs.filter(r=>r.status==='pending');
+  if(serverMode)return `${pageHead('Mis registros','Evidencias confirmadas por el servidor.','','TRABAJO DE CAMPO')}<div class="notice">${icon('shield',16)}<span>Solo aparecen registros con todos sus archivos verificados. La cola pendiente del teléfono se conectará en la app móvil.</span></div>${dailyChart(rs,true)}<div class="card" style="margin-top:20px">${rs.map(r=>`<div class="sync-row"><div><h3>${e(r.campaignName)}</h3><p>#${r.number} · ${r.media.length} archivos · ${fmtDate(r.capturedAt)}</p></div><button class="btn secondary" data-action="record-detail" data-id="${r.id}">Ver evidencia</button></div>`).join('')||empty('Aún no hay registros confirmados')}</div>`;
   return `${pageHead('Mis envíos','Revisa el estado de tus registros de ejemplo.','','TRABAJO DE CAMPO')}
   <div class="sync-banner"><div><h2>${pending.length?'Hay trabajo listo para enviar.':'Tus envíos están al día.'}</h2><p>${pending.length} registros pendientes · los originales permanecen sellados.<br>${state.cloudBusy?'Enviando registros de prueba…':pending.some(r=>r.cloudError)?e(pending.find(r=>r.cloudError).cloudError):cloud?'Al sellar se envía automáticamente. Si falla, se conserva para reintentar.':'Esta copia no tiene un servicio de nube conectado. Los registros permanecen pendientes.'}</p></div><button class="btn lime" data-action="sync" ${!pending.length||state.cloudBusy?'disabled':''}>${icon('upload',17)} ${state.cloudBusy?'Actualizando…':'Actualizar a la nube'}</button></div>
-  ${dailyChart(rs)}<div class="card"><div class="section-heading"><h2>Registros de ${e(actor().name.split(' ')[0])}</h2><span class="pill">${rs.length} registros</span></div>${[...rs].sort((a,b)=>new Date(b.capturedAt)-new Date(a.capturedAt)).map(r=>`<div class="sync-row"><div class="row"><div class="campaign-icon">${icon('camera',20)}</div><div><h3>${e(campaign(r.campaignId)?.name)}</h3><p>${TYPE_NAMES[r.type]} · ${r.media.length} archivos · ${fmtDate(r.capturedAt)}<br>${r.number?'#'+String(r.number).padStart(3,'0'):'Número final pendiente'}</p></div></div><div class="row">${recordStatus(r)}<button class="icon-btn" data-action="record-detail" data-id="${r.id}" aria-label="Ver registro">${icon('eye',16)}</button></div></div>`).join('')||empty('Aún no tienes registros')}</div><div class="notice amber" style="margin-top:18px">${icon('info',17)}<span>La nube almacena los metadatos de registros de prueba; no se transfieren archivos de fotos o videos reales. La cola de este prototipo no tiene cifrado en el dispositivo.</span></div>`;
+  ${dailyChart(rs,true)}<div class="card"><div class="section-heading"><h2>Registros de ${e(actor().name.split(' ')[0])}</h2><span class="pill">${rs.length} registros</span></div>${[...rs].sort((a,b)=>new Date(b.capturedAt)-new Date(a.capturedAt)).map(r=>`<div class="sync-row"><div class="row"><div class="campaign-icon">${icon('camera',20)}</div><div><h3>${e(campaign(r.campaignId)?.name)}</h3><p>${TYPE_NAMES[r.type]} · ${r.media.length} archivos · ${fmtDate(r.capturedAt)}<br>${r.number?'#'+String(r.number).padStart(3,'0'):'Número final pendiente'}</p></div></div><div class="row">${recordStatus(r)}<button class="icon-btn" data-action="record-detail" data-id="${r.id}" aria-label="Ver registro">${icon('eye',16)}</button></div></div>`).join('')||empty('Aún no tienes registros')}</div><div class="notice amber" style="margin-top:18px">${icon('info',17)}<span>La nube almacena los metadatos de registros de prueba; no se transfieren archivos de fotos o videos reales. La cola de este prototipo no tiene cifrado en el dispositivo.</span></div>`;
 }
 function showDialog(title,body,foot=''){
   modal.innerHTML=`<div class="dialog-head"><h2 id="dialog-title">${title}</h2><button class="icon-btn" data-action="close-dialog" aria-label="Cerrar ventana">${icon('close',18)}</button></div><div class="dialog-body">${body}</div>${foot?`<div class="dialog-foot">${foot}</div>`:''}`;
@@ -447,10 +449,11 @@ function invitationResult(inviteId){
 function recordDialog(id,seq=1){
   const r=ownRecords().find(r=>r.id===id);
   if(!r){toast('Este registro está fuera de tu alcance.');return;}
-  const m=data.memberships.find(m=>m.id===r.membershipId),u=r.author||user(m?.userId),selected=r.media[seq-1]||r.media[0];
+  const m=data.memberships.find(m=>m.id===r.membershipId),u=r.author||user(m?.userId),selected=r.media[seq-1]||r.media[0],gps=selected.gps||r,mapsUrl=googleMapsUrl(gps);
+  const gpsField=`<small>${serverMode?'GPS al capturar':'GPS de ejemplo'}${Number.isFinite(gps.accuracy)?' · precisión ±'+gps.accuracy+' m':''}</small><strong>${gpsLabel(gps)}</strong>`;
   const filename=r.number?finalFilename(r.campaignName||campaign(r.campaignId)?.name||'Campaña',r.number,seq,selected.kind==='video'?'mp4':'jpg'):'Nombre final pendiente de sincronización';
   showDialog(`Registro ${r.number?'#'+String(r.number).padStart(3,'0'):'pendiente'}`,`<div class="between"><span>${e(campaign(r.campaignId)?.name)}</span>${typePill(r.type)}</div>${serverMode?`<div class="photo-art">${selected.kind==='photo'?`<img src="/api/records/${r.id}/media/${selected.id}" alt="Evidencia registrada" style="width:100%;height:100%;object-fit:contain">`:`<video controls playsinline src="/api/records/${r.id}/media/${selected.id}" style="width:100%;height:100%"></video>`}</div>`:selected.kind==='photo'?photoArt(seq):`<div class="media-placeholder"><div>${icon('video',42)}<p>Video de ejemplo</p><small>No se ha grabado un archivo real.</small></div></div>`}<div class="detail-media-tabs">${r.media.map((x,i)=>`<button class="${seq===i+1?'active':''}" data-action="record-media" data-id="${r.id}" data-seq="${i+1}">${x.kind==='photo'?'Foto':'Video'} ${i+1}</button>`).join('')}</div>
-  <p class="muted" style="font-size:10px;overflow-wrap:anywhere">${e(filename)}</p><div class="details-grid"><div><small>Colaborador</small><strong>${e(r.author?.name||u?.name)}${authorStatus(r)}</strong></div><div><small>${selected.kind==='video'?'Inicio de grabación':'Fecha y hora'} ${serverMode?'':'· ejemplo'}</small><strong>${fmtDate(selected.capturedAt||r.capturedAt)}</strong></div><div><small>${serverMode?'GPS al capturar':'GPS de ejemplo'} · precisión ±${r.accuracy} m</small><strong>${gpsLabel(r)}</strong></div><div><small>Dispositivo ${serverMode?'':'· ejemplo'}</small><strong>${e(r.device.brand)} · ${e(r.device.model)}</strong></div><div><small>Identificador de instalación</small><strong style="overflow-wrap:anywhere">${e(r.device.installationId)}</strong></div><div><small>Estado</small>${recordStatus(r)}</div></div><div><label>Notas</label><p class="sub" style="font-size:12px">${e(r.notes||'Sin notas.')}</p></div><div class="notice">${icon('shield',16)}<span>Registro sellado. Las evidencias originales no pueden modificarse ni eliminarse desde esta vista.</span></div>`,`<button class="btn secondary" data-action="close-dialog">Cerrar</button>`);
+  <p class="muted" style="font-size:10px;overflow-wrap:anywhere">${e(filename)}</p><div class="details-grid"><div><small>Autor del registro</small><strong>${e(r.author?.name||u?.name)}${authorStatus(r)}</strong></div><div><small>${selected.kind==='video'?'Inicio de grabación':'Fecha y hora'} ${serverMode?'':'· ejemplo'}</small><strong>${fmtDate(selected.capturedAt||r.capturedAt)}</strong></div><div class="gps-field">${mapsUrl?`<a class="gps-link" href="${e(mapsUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Abrir coordenadas ${e(gps.lat)}, ${e(gps.lng)} en Google Maps">${gpsField}<span>Abrir en Google Maps</span></a>`:gpsField}</div><div><small>Dispositivo ${serverMode?'':'· ejemplo'}</small><strong>${e(r.device.brand)} · ${e(r.device.model)}</strong></div><div><small>Identificador de instalación</small><strong style="overflow-wrap:anywhere">${e(r.device.installationId)}</strong></div><div><small>Estado</small>${recordStatus(r)}</div></div><div><label>Notas</label><p class="sub" style="font-size:12px">${e(r.notes||'Sin notas.')}</p></div><div class="notice">${icon('shield',16)}<span>Registro sellado. Las evidencias originales no pueden modificarse ni eliminarse desde esta vista.</span></div>`,`<button class="btn secondary" data-action="close-dialog">Cerrar</button>`);
 }
 
 document.addEventListener('click',async event=>{
@@ -476,12 +479,12 @@ document.addEventListener('click',async event=>{
     case 'login-mode':state.loginMode=mode;renderLogin();break;
     case 'login-back':state.loginStep=1;renderLogin();break;
     case 'new-campaign':campaignDialog();break;
-    case 'open-campaign':state.filters={campaign:id,types:[...campaign(id).types],from:'',to:''};navigate('evidence');break;
+    case 'open-campaign':state.filters={campaign:id,types:[...campaign(id).types],from:'',to:'',mediaKind:'',personal:false};navigate('evidence');break;
     case 'invite-user':inviteDialog();break;
     case 'new-user':manualUserDialog();break;
     case 'delete-user':deleteUserDialog(id);break;
     case 'confirm-delete-user':await deleteUser(id,target);break;
-    case 'chart-bar':{const chart=target.closest('.daily-chart');chart.querySelectorAll('.chart-bar').forEach(b=>b.setAttribute('aria-pressed',String(b===target)));chart.querySelector('.chart-readout').textContent=target.dataset.label;break;}
+    case 'chart-bar':{const day=target.dataset.day,mediaKind=target.dataset.mediaKind;if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!['photo','video'].includes(mediaKind))return;state.filters={campaign:'',types:Object.keys(TYPE_NAMES),from:day,to:day,mediaKind,personal:target.dataset.personal==='true'};navigate('evidence');break;}
     case 'move-user':moveUserDialog(id);break;
     case 'edit-profile-name':editProfileName(id);break;
     case 'cancel-profile-name':userDialog(id);break;
@@ -501,7 +504,7 @@ document.addEventListener('click',async event=>{
     case 'expand-teams':case 'collapse-teams':for(const m of scopedMemberships(data,actor()))state.branchOpen[m.id]=action==='expand-teams';render();break;
     case 'record-detail':recordDialog(id);break;
     case 'record-media':recordDialog(id,Number(seq));break;
-    case 'clear-filters':state.filters={campaign:'',types:Object.keys(TYPE_NAMES),from:'',to:''};render();break;
+    case 'clear-filters':state.filters={campaign:'',types:[],from:'',to:'',mediaKind:'',personal:false};render();break;
     case 'add-media':{
       const d=draft();assertEditable(d);
       if(kind!=='photo'&&kind!=='video')return;
@@ -542,12 +545,13 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape'&&event.targe
 document.addEventListener('change',event=>{
   const el=event.target;
   if(el.id==='demo-role'){
-    state.actorId=el.value;state.filters={campaign:'',types:Object.keys(TYPE_NAMES),from:'',to:''};state.usersSearch='';state.userCampaign='';state.userRole='';state.userStatus='';state.successId=null;
+    state.actorId=el.value;state.filters={campaign:'',types:Object.keys(TYPE_NAMES),from:'',to:'',mediaKind:'',personal:false};state.usersSearch='';state.userCampaign='';state.userRole='';state.userStatus='';state.successId=null;
     state.view=actor().role==='collaborator'?'capture':'dashboard';render();return;
   }
   const userFilters={'user-campaign':'userCampaign','user-role':'userRole','user-status':'userStatus'};
   if(userFilters[el.id]){state[userFilters[el.id]]=el.value;render();return;}
   if(el.id==='filter-campaign'){state.filters.campaign=el.value;state.filters.types=el.value?[...campaign(el.value).types]:Object.keys(TYPE_NAMES);render();return;}
+  if(el.id==='filter-media-kind'){state.filters.mediaKind=el.value;render();return;}
   if(el.id==='filter-from'||el.id==='filter-to'){state.filters[el.id==='filter-from'?'from':'to']=el.value;render();return;}
   if(el.name==='filter-type'){state.filters.types=[...document.querySelectorAll('[name="filter-type"]:checked')].map(x=>x.value);render();return;}
   if(el.id==='capture-campaign'){const d=draft(),c=captureCampaigns(data,actor()).find(c=>c.id===el.value);if(d.media.length||!c)return;d.campaignId=c.id;d.type=c.types.length===1?c.types[0]:'';save();render();return;}

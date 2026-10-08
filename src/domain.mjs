@@ -1,5 +1,6 @@
 export const TYPE_NAMES = {lona:'Lona', espectacular:'Espectacular', barda:'Barda'};
 export const ROLE_NAMES = {admin:'Administrador', leader:'Líder', coordinator:'Coordinador', collaborator:'Colaborador'};
+export const CAPTURE_ROLES = ['leader','coordinator','collaborator'];
 export const CHILD_ROLE = {admin:'leader', leader:'coordinator', coordinator:'collaborator'};
 export function seedData() {
   return {
@@ -75,7 +76,7 @@ export function canManageMember(data,actor,target) {
 }
 export function visibleRecords(data,actor) {
   const scope=new Set(scopedMemberships(data,actor).map(m=>m.id));
-  return data.records.filter(r=>scope.has(r.membershipId)||actor.role==='collaborator'&&data.memberships.some(m=>m.id===r.membershipId&&m.userId===actor.id));
+  return data.records.filter(r=>scope.has(r.membershipId)||CAPTURE_ROLES.includes(actor.role)&&data.memberships.some(m=>m.id===r.membershipId&&m.userId===actor.id));
 }
 export function teamSummary(data,memberId) {
   const scope=descendants(data,memberId),members=data.memberships.filter(m=>scope.has(m.id));
@@ -105,9 +106,9 @@ export function transferTarget(data,actor,memberId,parentId) {
   return {source,parent,branch};
 }
 export function captureCampaigns(data,actor){
-  if(actor.role!=='collaborator')return [];
+  if(!CAPTURE_ROLES.includes(actor.role)||actor.active===false||actor.deleted)return [];
   return data.campaigns.filter(c=>c.status==='active'&&data.memberships.some(m=>{
-    if(m.userId!==actor.id||m.role!=='collaborator'||m.campaignId!==c.id||m.status!=='active')return false;
+    if(m.userId!==actor.id||m.role!==actor.role||m.campaignId!==c.id||m.status!=='active')return false;
     let ancestor=m;const seen=new Set();
     while(ancestor.parentId){if(seen.has(ancestor.id))return false;seen.add(ancestor.id);ancestor=data.memberships.find(p=>p.id===ancestor.parentId);if(!ancestor||ancestor.status!=='active'||ancestor.campaignId!==c.id)return false;}
     return ancestor.role==='leader';
@@ -118,8 +119,8 @@ export function dateInMexico(iso) {
   const get=t=>parts.find(p=>p.type===t).value;
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
-export function filterRecords(records,{campaign='',types=null,from='',to=''}={}) {
-  return records.filter(r=>(!campaign||r.campaignId===campaign)&&(types===null||types.includes(r.type))&&(!from||dateInMexico(r.capturedAt)>=from)&&(!to||dateInMexico(r.capturedAt)<=to));
+export function filterRecords(records,{campaign='',types=null,from='',to='',mediaKind=''}={}) {
+  return records.filter(r=>(!campaign||r.campaignId===campaign)&&(types===null||types.includes(r.type))&&(!mediaKind||r.media?.some(m=>m.kind===mediaKind))&&(!from||dateInMexico(r.capturedAt)>=from)&&(!to||dateInMexico(r.capturedAt)<=to));
 }
 export function validateCampaign(actor,input,data) {
   if(actor.role!=='admin') throw Error('Solo el administrador puede crear campañas.');
@@ -129,8 +130,8 @@ export function validateCampaign(actor,input,data) {
   return {...input,name:input.name.trim(),location:input.location.trim()};
 }
 export function assertCapture(data,actor,campaignId,type,media) {
-  const member=data.memberships.find(m=>m.userId===actor.id&&m.campaignId===campaignId&&m.role==='collaborator'&&m.status==='active');
-  if(!member || !captureCampaigns(data,actor).some(c=>c.id===campaignId)) throw Error('La captura está disponible para colaboradores asignados a una campaña activa.');
+  const member=data.memberships.find(m=>m.userId===actor.id&&m.campaignId===campaignId&&m.role===actor.role&&m.status==='active');
+  if(!member || !captureCampaigns(data,actor).some(c=>c.id===campaignId)) throw Error('La captura está disponible para líderes, coordinadores y colaboradores con una asignación activa en su propia campaña.');
   const c=data.campaigns.find(c=>c.id===campaignId);
   if(!c?.types.includes(type)) throw Error('Elige un tipo permitido por la campaña.');
   if(media.some(m=>!['photo','video'].includes(m.kind))) throw Error('Tipo de evidencia inválido.');
@@ -157,4 +158,9 @@ export function assertDeletable(data,actor,m) {
 export function dailyEvidence(records,days=4) {
   const last=records.length?records.map(r=>dateInMexico(r.capturedAt)).sort().at(-1):dateInMexico(new Date().toISOString());
   return Array.from({length:days},(_,i)=>{const date=new Date(last+'T12:00:00Z');date.setUTCDate(date.getUTCDate()+i-days+1);const day=date.toISOString().slice(0,10),media=records.filter(r=>dateInMexico(r.capturedAt)===day).flatMap(r=>r.media);return {day,photos:media.filter(m=>m.kind==='photo').length,videos:media.filter(m=>m.kind==='video').length};});
+}
+
+export function googleMapsUrl(gps){
+  if(!Number.isFinite(gps?.lat)||!Number.isFinite(gps?.lng)||Math.abs(gps.lat)>90||Math.abs(gps.lng)>180)return null;
+  const url=new URL('https://www.google.com/maps/search/');url.searchParams.set('api','1');url.searchParams.set('query',`${gps.lat},${gps.lng}`);return url.toString();
 }

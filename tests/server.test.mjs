@@ -273,3 +273,17 @@ test('definitive user deletion retains encrypted evidence and remains read-only 
   forbidden(()=>f.service.updateMember(f.actor('c1'),'m4',{name:'Reactivate',status:'active'}),404);
   forbidden(()=>f.service.createRecord(f.actor('f1'),manifest()),403);f.close();
 });
+
+test('leader and coordinator receive, upload and confirm only their own records with server-verified authorship',()=>{
+  const f=fixture(),bytes=Buffer.from([255,216,255,224,1,2,3,4]);
+  for(const [author,member] of [['l1','m1'],['c1','m2']]){
+    const input=manifest(member);const created=f.service.createRecord(f.actor(author),input);assert.equal(created.status,'uploading');
+    forbidden(()=>f.service.createRecord(f.actor(author),manifest('m4')),403);
+    const other=author==='l1'?'c1':'l1';forbidden(()=>f.service.uploadChunk(f.actor(other),input.id,input.media[0].id,0,bytes),404);
+    f.service.uploadChunk(f.actor(author),input.id,input.media[0].id,0,bytes);assert.equal(f.service.finalize(f.actor(author),input.id).status,'synced');
+    const r=f.service.bootstrap(f.actor(author)).records.find(r=>r.id===input.id);assert.equal(r.author.id,author);assert.equal(r.author.name,f.actor(author).name);
+    assert.equal(f.service.media(f.actor(author),input.id,input.media[0].id).bytes.length,bytes.length);
+  }
+  forbidden(()=>f.service.createRecord(f.actor('c1'),manifest('m8')),403);forbidden(()=>f.service.createRecord(f.actor('l1'),manifest('m7')),403);
+  f.close();
+});

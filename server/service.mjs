@@ -1,5 +1,5 @@
 import {createHash,randomBytes,randomInt,randomUUID,timingSafeEqual} from 'node:crypto';
-import {seedData,scopedMemberships,visibleCampaigns,canManageMember,visibleRecords,validateCampaign,manualAssignment,transferTarget,assertDeletable,TYPE_NAMES,finalFilename} from '../src/domain.mjs';
+import {seedData,scopedMemberships,visibleCampaigns,canManageMember,visibleRecords,validateCampaign,manualAssignment,transferTarget,assertDeletable,CAPTURE_ROLES,TYPE_NAMES,finalFilename} from '../src/domain.mjs';
 import {CHUNK_BYTES} from './files.mjs';
 export class ApiError extends Error {constructor(status,message){super(message);this.status=status;}}
 export const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -201,7 +201,7 @@ export class Service {
   createRecord(actor,input){
     const id=uuid(input.id),d=this.data(),member=d.memberships.find(m=>m.id===input.membershipId);
     const sealed=this.store.get('SELECT * FROM records WHERE id=?',id);
-    if(actor.role!=='collaborator'||!member||member.userId!==actor.id||!sealed&&member.status!=='active')throw new ApiError(403,'Solo un colaborador activo puede registrar sus evidencias.');
+    if(!CAPTURE_ROLES.includes(actor.role)||!member||member.role!==actor.role||member.userId!==actor.id||!sealed&&member.status!=='active')throw new ApiError(403,'Solo un líder, coordinador o colaborador activo puede registrar sus propias evidencias.');
     if(!sealed){let ancestor=member;while(ancestor.parentId){ancestor=d.memberships.find(m=>m.id===ancestor.parentId);if(!ancestor||ancestor.status!=='active')throw new ApiError(403,'La rama no está activa.');}}
     const c=d.campaigns.find(c=>c.id===member.campaignId);
     if(!c||c.status!=='active'||!TYPE_NAMES[input.type]||!c.types.includes(input.type))throw new ApiError(400,'Tipo no permitido por la campaña.');
@@ -234,7 +234,7 @@ export class Service {
     const r=this.store.get('SELECT * FROM records WHERE id=?',id);
     if(!r)throw new ApiError(404,'Registro no disponible.');
     const manifest=JSON.parse(r.manifest),scope=scopedMemberships(this.data(),actor);
-    const author=actor.role==='collaborator'&&manifest.author.id===actor.id;
+    const author=CAPTURE_ROLES.includes(actor.role)&&manifest.author.id===actor.id;
     if(!scope.some(m=>m.id===r.membership_id)&&!author||write&&!author)throw new ApiError(404,'Registro no disponible.');
     if(write&&r.status==='synced')throw new ApiError(409,'El registro ya fue confirmado y es inmutable.');
     return {...r,manifest};

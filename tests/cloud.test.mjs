@@ -43,3 +43,14 @@ test('cloud deletion marker persists independently of immutable records and stay
   const list=await (await f.request('GET')).json();assert.equal(list.deletions.length,1);assert.equal(list.deletions[0].id,'m4');assert.deepEqual(list.records[0].record,saved.record);
   assert.equal((await (await f.request('GET',null,'another-owner')).json()).deletions.length,0);f.sqlite.close();
 });
+
+test('cloud accepts leader and coordinator author snapshots without changing immutable retry behavior',async()=>{
+  const f=fixture();
+  for(const [author,member,name] of [['l1','m1','Mariana Torres'],['c1','m2','Diego Méndez']]){
+    const p=payload('role-'+author);p.record.author={id:author,name};p.record.membershipId=member;
+    p.context.memberships=p.context.memberships.filter(m=>m.id===member||m.id==='m1');p.context.users=p.context.users.filter(u=>u.id===author||u.id==='l1');
+    const response=await f.request('POST',p);assert.equal(response.status,201);const saved=await response.json();assert.equal(saved.record.author.id,author);
+    const retry=await (await f.request('POST',p)).json();assert.equal(retry.receipt.number,saved.receipt.number);
+  }
+  f.sqlite.close();
+});

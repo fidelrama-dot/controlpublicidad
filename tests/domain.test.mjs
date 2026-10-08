@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {seedData,scopedMemberships,visibleCampaigns,canManageMember,visibleRecords,filterRecords,validateCampaign,assertCapture,assertEditable,finalFilename,dateInMexico,dailyEvidence} from '../src/domain.mjs';
+import {seedData,scopedMemberships,visibleCampaigns,canManageMember,visibleRecords,filterRecords,validateCampaign,assertCapture,assertEditable,finalFilename,dateInMexico,dailyEvidence,captureCampaigns,googleMapsUrl} from '../src/domain.mjs';
 const fixture=()=>{const data=seedData();return {data,actor:id=>data.users.find(u=>u.id===id)};};
 test('leaders see only their campaign branches, including descendants',()=>{
   const {data,actor}=fixture();
@@ -76,4 +76,18 @@ test('explicit empty type selection yields zero records, default selection yield
 test('daily evidence counts media on Mexico capture date and includes the latest capture',()=>{
   const rs=[{capturedAt:'2026-10-07T02:00:00Z',media:[{kind:'photo'},{kind:'photo'},{kind:'video'}]},{capturedAt:'2026-10-07T08:00:00Z',media:[{kind:'photo'}]}];
   const days=dailyEvidence(rs);assert.equal(days.at(-2).day,'2026-10-06');assert.equal(days.at(-2).photos,2);assert.equal(days.at(-2).videos,1);assert.equal(days.at(-1).photos,1);
+});
+
+test('capture is assigned to the active author at any field role, never a descendant or sibling',()=>{
+  const {data,actor}=fixture(),media=[{kind:'photo'}];
+  assert.equal(assertCapture(data,actor('l1'),'p1','lona',media).id,'m1');
+  assert.equal(assertCapture(data,actor('l1'),'p3','barda',media).id,'m10');
+  assert.equal(assertCapture(data,actor('c1'),'p1','barda',media).id,'m2');
+  assert.throws(()=>assertCapture(data,actor('l1'),'p2','espectacular',media));assert.throws(()=>assertCapture(data,actor('c1'),'p2','espectacular',media));
+  data.memberships.find(m=>m.id==='m1').status='inactive';
+  assert.equal(captureCampaigns(data,actor('c1')).length,0);assert.throws(()=>assertCapture(data,actor('l1'),'p1','lona',media));
+});
+test('maps coordinates accept the equator and reject missing or out-of-range GPS',()=>{
+  assert.equal(new URL(googleMapsUrl({lat:0,lng:0})).searchParams.get('query'),'0,0');
+  for(const gps of [null,{lat:null,lng:0},{lat:91,lng:0},{lat:0,lng:181}])assert.equal(googleMapsUrl(gps),null);
 });

@@ -213,8 +213,7 @@ test('breadcrumb and brand navigate to home, and daily bars expose exact photo/v
   const a=createApp();a.login();
   assert.equal(a.q('.breadcrumb a[aria-current]').textContent,'Resumen');
   assert.equal(a.document.querySelectorAll('.chart-axis span').length,5);
-  const first=a.q('.chart-bar');a.click('.chart-bar');assert.equal(a.q('.chart-readout').textContent,first.dataset.label);
-  assert.equal(first.getAttribute('aria-pressed'),'true');
+  const first=a.q('.chart-bar');const day=first.dataset.day;a.click('.chart-bar');assert.match(a.q('h1').textContent,/Evidencias/);assert.equal(a.q('#filter-from').value,day);assert.equal(a.q('#filter-to').value,day);assert.equal(a.q('#filter-media-kind').value,'photo');
   a.click('[data-nav="users"]');a.click('.breadcrumb [data-nav="home"]');assert.match(a.q('h1').textContent,/Todo en su lugar/);
   a.click('[data-nav="users"]');a.click('.brand');assert.match(a.q('h1').textContent,/Todo en su lugar/);
   a.change('#demo-role','f1');a.click('[data-nav="sync"]');
@@ -229,7 +228,7 @@ test('evidence types start checked, empty selection shows none, campaign change 
   for(const value of ['lona','espectacular','barda']){const box=a.q('[name="filter-type"][value="'+value+'"]');box.checked=false;box.dispatchEvent(new a.dom.window.Event('change',{bubbles:true}));}
   assert.equal(a.document.querySelectorAll('.evidence-card').length,0);
   a.change('#filter-campaign','p2');assert.equal(a.document.querySelectorAll('[name="filter-type"]:checked').length,1);assert.equal(a.q('[name="filter-type"]').value,'espectacular');
-  a.click('[data-action="clear-filters"]');assert.equal(a.document.querySelectorAll('.evidence-card').length,18);
+  a.click('[data-action="clear-filters"]');assert.equal(a.document.querySelectorAll('[name="filter-type"]:checked').length,0);assert.equal(a.document.querySelectorAll('.evidence-card').length,0);assert.equal(a.q('#filter-from').value,'');assert.equal(a.q('#filter-to').value,'');assert.equal(a.q('#filter-media-kind').value,'');
   assert.deepEqual(a.errors,[]);a.close();
 });
 test('coordinator deletion confirms, retains original evidence and blocks future editing and capture',async()=>{
@@ -267,4 +266,46 @@ test('seal tries cloud automatically, lost confirmation stays queued, retry pres
   assert.deepEqual(a.errors,[]);a.close();
   a=createApp(null,fetcher);await tick();a.login();a.change('#demo-role','f1');a.click('[data-nav="sync"]');
   assert.match(a.q('#page').textContent,/En nube/);assert.equal(a.document.querySelectorAll('.sync-row').length,6);assert.deepEqual(a.errors,[]);a.close();
+});
+
+test('leaders and coordinators capture as themselves only in their campaigns, with immutable seal and personal sending list',()=>{
+  const seed=seedData();seed.records[0].capturedAt=new Date().toISOString();const a=createApp(JSON.stringify({version:1,data:seed}));a.login();
+  for(const [id,member,expected] of [['l1','m1',['p1','p3']],['c1','m2',['p1']]]){
+    a.change('#demo-role',id);a.click('.sidebar [data-nav="capture"]');
+    assert.deepEqual([...a.q('#capture-campaign').options].map(o=>o.value),expected);
+    a.change('[name="capture-type"][value="lona"]','lona');a.click('[data-action="add-media"][data-kind="photo"]');a.click('[data-action="seal-record"]');
+    const d=JSON.parse(a.dom.window.localStorage.getItem('controlpublicidad-screens-v1')).data,r=d.records.find(r=>r.author?.id===id);
+    assert.equal(r.membershipId,member);assert.equal(r.status,'pending');assert.equal(r.author.name,d.users.find(u=>u.id===id).name);
+    a.click('[data-nav="sync"]');assert.equal(a.document.querySelectorAll('.sync-row').length,1);
+    a.q('.chart-bar[data-media-kind="photo"][data-count="1"]').click();assert.deepEqual([...a.document.querySelectorAll('.evidence-card')].map(el=>el.dataset.id),[r.id]);
+    a.click('.sidebar [data-nav="sync"]');
+    a.click('.sync-row [data-action="record-detail"]');assert.equal(a.document.querySelector('#modal [data-action="edit-record"]'),null);a.click('[data-action="close-dialog"]');
+  }
+  a.change('#demo-role','a1');assert.equal(a.document.querySelector('.sidebar [data-nav="capture"]'),null);
+  assert.deepEqual(a.errors,[]);a.close();
+});
+test('daily photo and video bars navigate to matching day and media without broadening role scope',()=>{
+  const a=createApp();a.login();
+  for(const kind of ['photo','video']){
+    a.click('.brand');const button=[...a.document.querySelectorAll('.chart-bar')].find(b=>b.dataset.mediaKind===kind&&Number(b.dataset.count)>0),day=button.dataset.day;
+    const d=seedData(),expected=d.records.filter(r=>r.capturedAt.slice(0,10)===day&&r.media.some(m=>m.kind===kind)).map(r=>r.id).sort();
+    button.click();assert.match(a.q('h1').textContent,/Evidencias/);
+    assert.equal(a.q('#filter-media-kind').value,kind);assert.equal(a.q('#filter-from').value,day);assert.equal(a.q('#filter-to').value,day);
+    assert.deepEqual([...a.document.querySelectorAll('.evidence-card')].map(el=>el.dataset.id).sort(),expected);
+  }
+  a.change('#demo-role','f1');a.click('[data-nav="sync"]');a.q('.chart-bar[data-media-kind="photo"][data-count="10"]').click();
+  assert.match(a.q('h1').textContent,/Evidencias/);assert.equal(a.document.querySelectorAll('.evidence-card').length,5);
+  assert.match(a.q('#page').textContent,/Sofía López/);assert.doesNotMatch(a.q('#page').textContent,/Luis Hernández|Valeria Cruz/);
+  assert.deepEqual(a.errors,[]);a.close();
+});
+test('photo details from evidence or map expose a safe Google Maps link for the exact selected coordinate',()=>{
+  const d=seedData();d.records[0].media[0].gps={lat:0,lng:-101.19812345,accuracy:6};
+  const a=createApp(JSON.stringify({version:1,data:d}));a.login();
+  for(const view of ['evidence','map']){
+    a.click('.sidebar [data-nav="'+view+'"]');a.click(view==='evidence'?'[data-action="record-detail"][data-id="r1"]':'.pin[data-id="r1"]');
+    const link=a.q('.gps-link'),url=new URL(link.href);assert.equal(url.origin,'https://www.google.com');assert.equal(url.pathname,'/maps/search/');
+    assert.equal(url.searchParams.get('api'),'1');assert.equal(url.searchParams.get('query'),'0,-101.19812345');assert.equal(link.target,'_blank');assert.match(link.rel,/noopener/);
+    assert.match(link.textContent,/precisión ±6 m/);a.click('[data-action="record-media"][data-seq="2"]');assert.equal(new URL(a.q('.gps-link').href).searchParams.get('query'),'19.702,-101.201');a.click('[data-action="close-dialog"]');
+  }
+  assert.deepEqual(a.errors,[]);a.close();
 });
