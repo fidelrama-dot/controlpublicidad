@@ -42,7 +42,7 @@ public final class CameraActivity extends Activity implements LocationListener {
  @Override protected void onResume(){super.onResume();closing=false;startGps();if(texture!=null&&texture.isAvailable()&&camera==null)openCamera();}
  private void startGps(){
   try{locations=(LocationManager)getSystemService(LOCATION_SERVICE);if(checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED){if(info!=null)info.setText("GPS sin permiso preciso. Puedes concederlo en Ajustes del teléfono.");return;}
-   for(String provider:new String[]{LocationManager.GPS_PROVIDER,LocationManager.NETWORK_PROVIDER})if(locations.isProviderEnabled(provider)){Location l=locations.getLastKnownLocation(provider);if(fresh(l)&&(fix==null||l.getAccuracy()<fix.getAccuracy()))fix=l;locations.requestLocationUpdates(provider,1000,0,this);}
+   for(String provider:new String[]{LocationManager.GPS_PROVIDER,LocationManager.NETWORK_PROVIDER})if(locations.getAllProviders().contains(provider)){Location l=locations.getLastKnownLocation(provider);if(fresh(l)&&(fix==null||l.getAccuracy()<fix.getAccuracy()))fix=l;locations.requestLocationUpdates(provider,1000,0,this);}
    refreshGps();
   }catch(Exception e){if(info!=null)info.setText("Activa la ubicación precisa del teléfono.");}
  }
