@@ -1,0 +1,14 @@
+node_modules
+qa/
+*.log
+server/.data/
+.env
+.env.*
+!.env.example
+build/
+*.apk
+*.idsig
+*.p12
+*.jks
+*signing-password*
+__pycache__/
